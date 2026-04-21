@@ -1,4 +1,4 @@
-﻿import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import { getProfile } from '@/lib/auth'
 import { redirect } from 'next/navigation'
 import AdminSubmissionsClient from '@/components/admin/AdminSubmissionsClient'
@@ -27,9 +27,9 @@ export default async function AdminSubmissionsPage() {
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700 }}>à¸›à¸£à¸°à¸§à¸±à¸•à¸´à¸à¸²à¸£à¸—à¸³à¹à¸šà¸šà¸—à¸”à¸ªà¸­à¸š</h1>
+        <h1 style={{ fontSize: 18, fontWeight: 700 }}>ประวัติการทำแบบทดสอบ</h1>
         <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
-          à¸”à¸¹à¹à¸¥à¸°à¸ˆà¸±à¸”à¸à¸²à¸£à¸œà¸¥à¸à¸²à¸£à¸ªà¸­à¸šà¸‚à¸­à¸‡à¸™à¸±à¸à¹€à¸£à¸µà¸¢à¸™à¸—à¸¸à¸à¸„à¸™
+          ดูและจัดการผลการสอบของนักเรียนทุกคน
         </p>
       </div>
       <AdminSubmissionsClient

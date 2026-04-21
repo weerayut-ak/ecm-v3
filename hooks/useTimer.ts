@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 interface UseTimerOptions {
@@ -34,16 +34,28 @@ export function useTimer({ initialSeconds, onExpire, autoStart = false }: UseTim
     return clear
   }, [running, clear])
 
-  const start = useCallback(() => setRunning(true), [])
-  const stop  = useCallback(() => setRunning(false), [])
-  const reset = useCallback(() => { stop(); setSeconds(initialSeconds) }, [initialSeconds, stop])
+  const start  = useCallback(() => setRunning(true), [])
+  const stop   = useCallback(() => setRunning(false), [])
+  const reset  = useCallback(() => { stop(); setSeconds(initialSeconds) }, [initialSeconds, stop])
+  const deduct = useCallback((secs: number) => {
+    setSeconds(prev => {
+      const next = prev - secs
+      if (next <= 0) {
+        clear()
+        setRunning(false)
+        onExpireRef.current?.()
+        return 0
+      }
+      return next
+    })
+  }, [clear])
 
-  const minutes = Math.floor(seconds / 60)
-  const secs    = seconds % 60
-  const display = `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
-  const percent  = initialSeconds > 0 ? (seconds / initialSeconds) * 100 : 0
+  const minutes   = Math.floor(seconds / 60)
+  const secs      = seconds % 60
+  const display   = `${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`
+  const percent   = initialSeconds > 0 ? (seconds / initialSeconds) * 100 : 0
   const isWarning = seconds < 300 && seconds > 60
   const isDanger  = seconds <= 60 && seconds > 0
 
-  return { seconds, display, percent, running, start, stop, reset, isWarning, isDanger }
+  return { seconds, display, percent, running, start, stop, reset, deduct, isWarning, isDanger }
 }

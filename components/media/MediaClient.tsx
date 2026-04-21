@@ -1,10 +1,19 @@
-﻿'use client'
+'use client'
 import { useState } from 'react'
 import { BookOpen, Video, Plus, X, Tag, Play, Clock, Eye, Search, ChevronRight } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import toast from 'react-hot-toast'
 
 interface MediaItem { id:string; type:'knowledge'|'video'; title:string; description:string|null; content:string|null; video_url:string|null; duration:string|null; tags:string[] }
+
+function toEmbedUrl(url: string | null): string | null {
+  if (!url) return null
+  const m1 = url.match(/youtube\.com\/watch\?(?:.*&)?v=([\w-]+)/)
+  if (m1) return `https://www.youtube.com/embed/${m1[1]}`
+  const m2 = url.match(/youtu\.be\/([\w-]+)/)
+  if (m2) return `https://www.youtube.com/embed/${m2[1]}`
+  return url
+}
 
 const ICONS: Record<string, string> = { Grammar:'📖', Vocabulary:'📝', Reading:'📚', Writing:'✏️', Listening:'🎧', Speaking:'🗣️' }
 
@@ -147,7 +156,7 @@ export default function MediaClient({ knowledge: kInit, videos: vInit, isAdmin }
               {selected.type === 'video' && (
                 <div style={{ borderRadius:'var(--r-lg)', overflow:'hidden', marginBottom:16, background:'#E8F0FE', aspectRatio:'16/9', display:'flex', alignItems:'center', justifyContent:'center' }}>
                   {selected.video_url
-                    ? <iframe src={selected.video_url} style={{ width:'100%', height:'100%' }} allowFullScreen />
+                    ? <iframe src={toEmbedUrl(selected.video_url)} style={{ width:'100%', height:'100%' }} allowFullScreen />
                     : <div style={{ textAlign:'center' }}><Play size={40} color="var(--blue)" style={{margin:'0 auto 8px'}}/><p style={{fontSize:12,color:'var(--text-3)'}}>ยังไม่มี URL วีดีโอ</p></div>}
                 </div>
               )}
@@ -201,7 +210,7 @@ function AddModal({ type, onClose, onSave }: { type:'knowledge'|'video'; onClose
           <div><label className="form-label">ชื่อหัวข้อ *</label><input className="input" value={form.title??''} onChange={e => setForm(p=>({...p,title:e.target.value}))} /></div>
           <div><label className="form-label">คำอธิบาย</label><input className="input" value={form.description??''} onChange={e => setForm(p=>({...p,description:e.target.value}))} /></div>
           {type==='knowledge' && <div><label className="form-label">เนื้อหา</label><textarea className="input" rows={5} value={form.content??''} onChange={e => setForm(p=>({...p,content:e.target.value}))} /></div>}
-          {type==='video' && <div><label className="form-label">URL วีดีโอ (YouTube Embed)</label><input className="input" placeholder="https://www.youtube.com/embed/..." value={form.video_url??''} onChange={e => setForm(p=>({...p,video_url:e.target.value}))} /></div>}
+          {type==='video' && <div><label className="form-label">URL วีดีโอ (YouTube Embed)</label><input className="input" placeholder="https://www.youtube.com/watch?v=... หรือ embed URL" value={form.video_url??''} onChange={e => setForm(p=>({...p,video_url:e.target.value}))} /></div>}
           {type==='video' && <div><label className="form-label">ความยาว</label><input className="input" placeholder="12:34" value={form.duration??''} onChange={e => setForm(p=>({...p,duration:e.target.value}))} /></div>}
           <div>
             <label className="form-label">แท็ก</label>

@@ -24,6 +24,11 @@ export default function ProfileClient({ profile: init, submissions, userId }: { 
     setSaving(false)
   }
 
+  async function logout() {
+    await supabase.auth.signOut()
+    window.location.href = '/login'
+  }
+
   async function uploadAvatar(file: File) {
     setUploading(true)
     const path = `avatars/${userId}-${Date.now()}.${file.name.split('.').pop()}`
@@ -142,6 +147,24 @@ export default function ProfileClient({ profile: init, submissions, userId }: { 
           </div>
         </div>
       )}
+      {/* Logout */}
+      <button
+        onClick={logout}
+        style={{
+          width: '100%', padding: '14px 20px', borderRadius: 'var(--r-full)',
+          background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)',
+          color: 'white', fontWeight: 700, fontSize: 14,
+          border: 'none', cursor: 'pointer',
+          boxShadow: '0 8px 20px rgba(239,68,68,0.25)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+          transition: 'all 0.2s ease',
+          fontFamily: 'inherit',
+        }}
+        onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 12px 30px rgba(239,68,68,0.35)')}
+        onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 8px 20px rgba(239,68,68,0.25)')}
+      >
+        ออกจากระบบ
+      </button>
     </div>
   )
 }

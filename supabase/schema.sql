@@ -210,3 +210,56 @@ CREATE TRIGGER on_auth_user_created
 -- =============================================
 -- Run after creating admin user via Supabase Auth dashboard
 -- UPDATE profiles SET role = 'admin' WHERE id = '<your-admin-user-id>';
+
+-- =============================================
+-- app_settings table (for editable semester etc.)
+-- =============================================
+CREATE TABLE IF NOT EXISTS app_settings (
+  key   text PRIMARY KEY,
+  value text NOT NULL
+);
+
+-- Enable RLS
+ALTER TABLE app_settings ENABLE ROW LEVEL SECURITY;
+
+-- Anyone can read settings
+CREATE POLICY "Anyone can read settings"
+  ON app_settings FOR SELECT USING (true);
+
+-- Only admins can update settings
+CREATE POLICY "Admins can update settings"
+  ON app_settings FOR ALL
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles
+      WHERE profiles.id = auth.uid()
+        AND profiles.role = 'admin'
+    )
+  );
+
+-- Default semester value
+INSERT INTO app_settings (key, value)
+VALUES ('semester', '1/2568')
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================
+-- QUIZ SESSIONS (leave violation tracking)
+-- =============================================
+CREATE TABLE IF NOT EXISTS quiz_sessions (
+  id          UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  student_id  UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  quiz_id     UUID REFERENCES quizzes(id) ON DELETE CASCADE,
+  status      TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','submitted','left','blocked')),
+  leave_count INT NOT NULL DEFAULT 0,
+  last_seen   TIMESTAMPTZ DEFAULT NOW(),
+  started_at  TIMESTAMPTZ DEFAULT NOW(),
+  reset_by    UUID REFERENCES profiles(id),
+  reset_at    TIMESTAMPTZ,
+  UNIQUE (student_id, quiz_id)
+);
+
+ALTER TABLE quiz_sessions ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Students manage own sessions, admins see all" ON quiz_sessions
+  FOR ALL TO authenticated
+  USING (student_id = auth.uid() OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));

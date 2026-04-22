@@ -37,6 +37,31 @@ function toDriveEmbedUrl(url: string | null): string | null {
   return url
 }
 
+
+function getYouTubeThumbnail(url: string | null): string | null {
+  if (!url) return null
+  const m1 = url.match(/youtube\.com\/watch\?(?:.*&)?v=([\w-]+)/)
+  if (m1) return `https://img.youtube.com/vi/${m1[1]}/hqdefault.jpg`
+  const m2 = url.match(/youtu\.be\/([\w-]+)/)
+  if (m2) return `https://img.youtube.com/vi/${m2[1]}/hqdefault.jpg`
+  return null
+}
+
+function getPdfThumbnailUrl(url: string | null): string | null {
+  if (!url) return null
+  // Use Google Docs viewer thumbnail for PDF
+  return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`
+}
+
+function getDriveThumbnail(url: string | null): string | null {
+  if (!url) return null
+  const m1 = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/)
+  if (m1) return `https://drive.google.com/thumbnail?id=${m1[1]}&sz=w400`
+  const m2 = url.match(/[?&]id=([\w-]+)/)
+  if (m2) return `https://drive.google.com/thumbnail?id=${m2[1]}&sz=w400`
+  return null
+}
+
 const ICONS: Record<string, string> = { Grammar: '📖', Vocabulary: '📝', Reading: '📚', Writing: '✏️', Listening: '🎧', Speaking: '🗣️' }
 
 const TYPE_LABELS = {
@@ -168,14 +193,37 @@ export default function MediaClient({ knowledge: kInit, videos: vInit, isAdmin }
                 const tinfo = TYPE_LABELS[v.type as keyof typeof TYPE_LABELS] ?? TYPE_LABELS.video
                 return (
                   <div key={v.id} className="video-card fade-up" onClick={() => setSelected(v)}>
-                    <div className="video-thumb" style={{ background: `linear-gradient(135deg, ${tinfo.color}, #F8FAFC)` }}>
-                      <div className="video-play" style={{ background: tinfo.tc }}>
+                    <div className="video-thumb" style={{ background: `linear-gradient(135deg, ${tinfo.color}, #F8FAFC)`, overflow: 'hidden', position: 'relative' }}>
+                      {/* Real preview thumbnail */}
+                      {v.type === 'video' && getYouTubeThumbnail(v.video_url) ? (
+                        <img
+                          src={getYouTubeThumbnail(v.video_url)!}
+                          alt={v.title}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      ) : v.type === 'drive' && getDriveThumbnail(v.drive_url) ? (
+                        <img
+                          src={getDriveThumbnail(v.drive_url)!}
+                          alt={v.title}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                        />
+                      ) : v.type === 'pdf' && v.file_url ? (
+                        <iframe
+                          src={`https://docs.google.com/viewer?url=${encodeURIComponent(v.file_url)}&embedded=true`}
+                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', pointerEvents: 'none', transform: 'scale(1)', transformOrigin: 'top left' }}
+                          title="preview"
+                        />
+                      ) : null}
+                      {/* Overlay play/icon button */}
+                      <div className="video-play" style={{ background: tinfo.tc, zIndex: 2 }}>
                         {v.type === 'pdf' ? <FileText size={20} color="white" /> :
                          v.type === 'drive' ? <Link size={20} color="white" /> :
                          <Play size={20} color="white" fill="white" />}
                       </div>
-                      {v.duration && <span style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 11, padding: '2px 6px', borderRadius: 4 }}>{v.duration}</span>}
-                      <span style={{ position: 'absolute', top: 8, left: 8 }} className={`badge badge-${v.type === 'pdf' ? 'red' : v.type === 'drive' ? 'amber' : 'green'}`}>{tinfo.label}</span>
+                      {v.duration && <span style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 11, padding: '2px 6px', borderRadius: 4, zIndex: 2 }}>{v.duration}</span>}
+                      <span style={{ position: 'absolute', top: 8, left: 8, zIndex: 2 }} className={`badge badge-${v.type === 'pdf' ? 'red' : v.type === 'drive' ? 'amber' : 'green'}`}>{tinfo.label}</span>
                     </div>
                     <div style={{ padding: '12px 14px' }}>
                       <h3 style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4, marginBottom: 5 }}>{v.title}</h3>

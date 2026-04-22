@@ -1,39 +1,139 @@
 'use client'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { Bell, ChevronRight } from 'lucide-react'
+import { Bell, Settings, Menu } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 interface Profile { full_name: string; nickname?: string | null; role: string }
 
-const TITLES: [string, string][] = [
-  ['/dashboard/admin',         'Admin Panel'],
-  ['/dashboard/students',      'รายชื่อนักเรียน'],
-  ['/dashboard/media',         'สื่อการสอน'],
-  ['/dashboard/announcements', 'ประกาศข่าวสาร'],
-  ['/dashboard/quizzes',       'แบบทดสอบ'],
-  ['/dashboard/profile',       'โปรไฟล์ของฉัน'],
-  ['/dashboard',               'Dashboard'],
-]
-
-export default function Topbar({ profile }: { profile: Profile | null }) {
-  const pathname = usePathname()
-  const title = TITLES.find(([k]) => pathname.startsWith(k))?.[1] ?? 'English Class'
+export default function Topbar({ profile, onMenuClick }: { profile: Profile | null; onMenuClick?: () => void }) {
   const initial = (profile?.nickname ?? profile?.full_name ?? 'G')[0]?.toUpperCase() ?? 'G'
+  const isAdmin = profile?.role === 'admin'
+
+  const [semester, setSemester] = useState('1/2568')
+  const [editing, setEditing] = useState(false)
+  const [editVal, setEditVal] = useState('1/2568')
+  const supabase = createClient()
+
+  useEffect(() => {
+    supabase.from('app_settings').select('value').eq('key', 'semester').single().then(({ data }) => {
+      if (data?.value) { setSemester(data.value); setEditVal(data.value) }
+    })
+  }, [])
+
+  async function saveSemester() {
+    await supabase.from('app_settings').upsert({ key: 'semester', value: editVal }, { onConflict: 'key' })
+    setSemester(editVal)
+    setEditing(false)
+  }
 
   return (
     <header style={{
-      height: 54, background: 'var(--surface)', borderBottom: '1px solid var(--border)',
+      height: 64,
+      background: 'rgba(249,249,255,0.85)',
+      backdropFilter: 'blur(20px)',
+      WebkitBackdropFilter: 'blur(20px)',
+      borderBottom: 'none',
+      boxShadow: '0 10px 30px rgba(20,27,43,0.04)',
+      backgroundImage: 'linear-gradient(to bottom, rgba(241,243,255,0.6), transparent)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 20px', flexShrink: 0, position: 'sticky', top: 0, zIndex: 30,
+      padding: '0 28px', flexShrink: 0, position: 'sticky', top: 0, zIndex: 30,
     }}>
-      <h2 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{title}</h2>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }} className="hidden sm:block">ภาคเรียน 1/2568</span>
-        <button className="btn btn-icon btn-ghost" style={{ position: 'relative' }}>
-          <Bell size={17} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Hamburger button */}
+        <button
+          onClick={onMenuClick}
+          title="เปิด/ปิดเมนู"
+          style={{
+            width: 40, height: 40, borderRadius: 12, border: 'none',
+            background: 'transparent', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: 'var(--outline)', transition: 'background 0.2s, color 0.2s',
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,80,203,0.09)'; e.currentTarget.style.color = '#0050cb' }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--outline)' }}
+        >
+          <Menu size={20} />
         </button>
+
+        <span style={{ fontWeight: 900, fontSize: 20, color: '#0050cb', letterSpacing: '-0.03em' }}>
+          English Class Manager
+        </span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {/* Semester display / edit */}
+        {editing && isAdmin ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--outline)', fontWeight: 600 }}>ภาคเรียน</span>
+            <input
+              value={editVal}
+              onChange={e => setEditVal(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveSemester(); if (e.key === 'Escape') setEditing(false) }}
+              autoFocus
+              style={{
+                fontSize: 12, fontWeight: 700, color: '#0050cb',
+                border: '1.5px solid #0050cb', borderRadius: 8,
+                padding: '3px 8px', width: 72, background: 'white',
+                fontFamily: 'inherit', outline: 'none',
+              }}
+            />
+            <button onClick={saveSemester} style={{ fontSize: 11, background: '#0050cb', color: 'white', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700 }}>บันทึก</button>
+            <button onClick={() => setEditing(false)} style={{ fontSize: 11, background: 'rgba(0,0,0,0.06)', color: 'var(--text-2)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>ยกเลิก</button>
+          </div>
+        ) : (
+          <span
+            onClick={() => isAdmin && setEditing(true)}
+            className="hidden sm:block"
+            title={isAdmin ? 'คลิกเพื่อแก้ไขภาคเรียน' : undefined}
+            style={{
+              fontSize: 12, color: 'var(--outline)', fontWeight: 600,
+              cursor: isAdmin ? 'pointer' : 'default',
+              padding: '4px 8px', borderRadius: 8,
+              transition: 'background 0.15s',
+              userSelect: 'none',
+            }}
+            onMouseEnter={e => isAdmin && (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
+            onMouseLeave={e => isAdmin && (e.currentTarget.style.background = 'transparent')}
+          >
+            ภาคเรียน {semester}{isAdmin && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.5 }}>✏️</span>}
+          </span>
+        )}
+
+        <button style={{
+          width: 40, height: 40, borderRadius: '50%', border: 'none',
+          background: 'transparent', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--outline)', transition: 'background 0.2s',
+        }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        >
+          <Bell size={18} />
+        </button>
+
+        <button style={{
+          width: 40, height: 40, borderRadius: '50%', border: 'none',
+          background: 'transparent', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: 'var(--outline)', transition: 'background 0.2s',
+        }}
+          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
+          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+        >
+          <Settings size={18} />
+        </button>
+
         <Link href="/dashboard/profile" style={{ textDecoration: 'none' }}>
-          <div style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--blue)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          <div style={{
+            width: 38, height: 38, borderRadius: '50%',
+            background: 'linear-gradient(135deg, #0050cb, #0066ff)',
+            color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontWeight: 800, fontSize: 14, cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(0,80,203,0.25)',
+            border: '2px solid rgba(255,255,255,0.8)',
+          }}>
             {initial}
           </div>
         </Link>

@@ -3,9 +3,10 @@ import { useState } from 'react'
 import type { Announcement } from '@/types/announcement'
 import { createClient } from '@/lib/supabase/client'
 import { parseExcelOrCSV, normalizeScoreRows } from '@/lib/upload'
-import { Plus, X, Pin, PinOff, Trash2, Upload, Megaphone, Image as ImageIcon, BarChart2, MoreVertical, ChevronDown } from 'lucide-react'
+import { Plus, X, Pin, PinOff, Trash2, Upload, Megaphone, Image as ImageIcon, BarChart2, MoreVertical, ChevronDown, LayoutGrid } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { createPortal } from 'react-dom'
+
 
 type Ann = Announcement & { author?: { full_name: string; nickname: string | null } | null }
 type ParsedRow = Record<string, string | number>
@@ -122,7 +123,7 @@ const CSS = `
   .ann-stat-count { font-size: 36px; font-weight: 900; letter-spacing: -0.04em; line-height: 1; }
   .ann-stat-sub   { font-size: 12px; opacity: 0.75; margin-top: 4px; }
 
-  @media (max-width: 767px) {
+@media (max-width: 767px) {
     .ann-page-title  { font-size: 24px; }
     .ann-layout      { grid-template-columns: 1fr; }
     .ann-sidebar     { display: none; }
@@ -132,6 +133,9 @@ const CSS = `
     .ann-card-body   { padding: 0 14px 4px; }
     .ann-card-footer { padding: 4px 14px 12px; }
     .ann-tbl th, .ann-tbl td { padding: 9px 10px; font-size: 12px; }
+    .pill-label { display: none; }
+    .pill-icon  { display: inline; font-size: 16px; }
+    .ann-pill   { padding: 7px 12px; }
   }
 `
 
@@ -218,9 +222,9 @@ function ScoreTable({ rows }: { rows: ParsedRow[] }) {
 
 /* ─── type icon / colour ─────────────────────────────────────────────── */
 const TYPE_META = {
-  text:   { icon: '📢', bg: 'rgba(0,80,203,0.1)',   color: 'var(--primary)',   label: 'ประกาศ' },
-  image:  { icon: '🖼️', bg: 'rgba(67,69,209,0.1)',  color: 'var(--tertiary)', label: 'รูปภาพ' },
-  scores: { icon: '📊', bg: 'rgba(0,104,119,0.1)',  color: 'var(--secondary)', label: 'คะแนน' },
+  text:   { icon: <Megaphone size={20} />,  bg: 'rgba(0,80,203,0.1)',  color: 'var(--primary)',    label: 'ประกาศ' },
+  image:  { icon: <ImageIcon size={20} />,  bg: 'rgba(67,69,209,0.1)', color: 'var(--tertiary)',   label: 'รูปภาพ' },
+  scores: { icon: <BarChart2 size={20} />,  bg: 'rgba(0,104,119,0.1)', color: 'var(--secondary)',  label: 'คะแนน' },
 }
 
 /* ─── Main component ─────────────────────────────────────────────────── */
@@ -359,11 +363,15 @@ export default function AnnouncementsClient({
       {/* Toolbar */}
       <div className="ann-toolbar">
         <div className="ann-pills">
-          {(['all','text','image','scores'] as const).map(f => (
-            <button key={f} className={`ann-pill ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}>
-              {f === 'all' ? 'ทั้งหมด' : f === 'text' ? '📢 ประกาศทั่วไป' : f === 'image' ? '🖼️ รูปภาพ' : '📊 ตารางคะแนน'}
-            </button>
-          ))}
+        {(['all','text','image','scores'] as const).map(f => (
+        <button key={f} className={`ann-pill ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}
+          style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
+          <span className="pill-icon" style={{ display:'flex', alignItems:'center' }}>
+            {f === 'all' ? <LayoutGrid size={16} /> : TYPE_META[f].icon}
+          </span>
+          <span className="pill-label">{f === 'all' ? 'ทั้งหมด' : TYPE_META[f].label}</span>
+        </button>
+        ))}
         </div>
         {isAdmin && (
           <button className="btn btn-primary" onClick={() => setModal(true)}>
@@ -507,21 +515,21 @@ function AddAnnouncementModal({
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
           {/* Type picker */}
-          <div>
+<div>
             <label className="form-label">ประเภทประกาศ</label>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {([
-                { v:'text',   label:'📢 ข้อความ' },
-                { v:'image',  label:'🖼️ รูปภาพ' },
-                { v:'scores', label:'📊 ตารางคะแนน' },
-              ] as const).map(({ v, label }) => (
+                { v:'text',   label:'ข้อความ',    icon: <Megaphone size={14} /> },
+                { v:'image',  label:'รูปภาพ',     icon: <ImageIcon size={14} /> },
+                { v:'scores', label:'ตารางคะแนน', icon: <BarChart2 size={14} /> },
+              ] as const).map(({ v, label, icon }) => (
                 <button
-                key={v}
+                  key={v}
                   onClick={() => setType(v)}
                   className={`btn btn-sm ${type === v ? 'btn-primary' : ''}`}
-                  style={{ whiteSpace: 'normal', textAlign: 'center' }}
+                  style={{ display:'inline-flex', alignItems:'center', gap:6 }}
                 >
-                  {label}
+                  {icon}{label}
                 </button>
               ))}
             </div>

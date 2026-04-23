@@ -346,8 +346,8 @@ export default function MediaClient({
       toast.error(`เพิ่มไม่สำเร็จ: ${error?.message || 'ข้อผิดพลาดที่ไม่รู้จัก'}`)
       return
     }
-    if (addModal === 'knowledge') setKnowledge(p => [...p, { ...form, type: addModal, id: data.id } as MediaItem])
-    else setVideos(p => [...p, { ...form, type: addModal, id: data.id } as MediaItem])
+    if (data.type === 'knowledge') setKnowledge(p => [...p, { ...form, ...data } as MediaItem])
+    else setVideos(p => [...p, { ...form, ...data } as MediaItem])
     toast.success('เพิ่มสำเร็จ ✓')
     setAddModal(null)
   }

@@ -1,8 +1,9 @@
 ﻿'use client'
 import { useState } from 'react'
-import { BookOpen, Video, Plus, X, Tag, Play, Search, ChevronRight, FileText, Link } from 'lucide-react'
+import { BookOpen, Video, Plus, X, Tag, Play, Search, ChevronRight, FileText, ExternalLink, ArrowLeft, ArrowRight, Pin, PinOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import toast from 'react-hot-toast'
+import { createPortal } from 'react-dom'
 
 interface MediaItem {
   id: string
@@ -15,6 +16,7 @@ interface MediaItem {
   tags: string[]
   file_url?: string | null
   drive_url?: string | null
+  is_pinned?: boolean
 }
 
 function toEmbedUrl(url: string | null): string | null {
@@ -26,18 +28,6 @@ function toEmbedUrl(url: string | null): string | null {
   return url
 }
 
-function toDriveEmbedUrl(url: string | null): string | null {
-  if (!url) return null
-  // https://drive.google.com/file/d/FILE_ID/view
-  const m1 = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/)
-  if (m1) return `https://drive.google.com/file/d/${m1[1]}/preview`
-  // https://drive.google.com/open?id=FILE_ID
-  const m2 = url.match(/[?&]id=([\w-]+)/)
-  if (m2) return `https://drive.google.com/file/d/${m2[1]}/preview`
-  return url
-}
-
-
 function getYouTubeThumbnail(url: string | null): string | null {
   if (!url) return null
   const m1 = url.match(/youtube\.com\/watch\?(?:.*&)?v=([\w-]+)/)
@@ -45,12 +35,6 @@ function getYouTubeThumbnail(url: string | null): string | null {
   const m2 = url.match(/youtu\.be\/([\w-]+)/)
   if (m2) return `https://img.youtube.com/vi/${m2[1]}/hqdefault.jpg`
   return null
-}
-
-function getPdfThumbnailUrl(url: string | null): string | null {
-  if (!url) return null
-  // Use Google Docs viewer thumbnail for PDF
-  return `https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true`
 }
 
 function getDriveThumbnail(url: string | null): string | null {
@@ -62,26 +46,289 @@ function getDriveThumbnail(url: string | null): string | null {
   return null
 }
 
-const ICONS: Record<string, string> = { Grammar: '📖', Vocabulary: '📝', Reading: '📚', Writing: '✏️', Listening: '🎧', Speaking: '🗣️' }
-
-const TYPE_LABELS = {
-  knowledge: { label: 'บทความ', icon: '📄', color: '#EFF6FF', tc: 'var(--blue)' },
-  video:     { label: 'วีดีโอ',  icon: '🎬', color: '#F0FDF4', tc: 'var(--green)' },
-  pdf:       { label: 'PDF',    icon: '📕', color: '#FEF2F2', tc: 'var(--red)' },
-  drive:     { label: 'Drive',  icon: '📁', color: '#FFFBEB', tc: 'var(--amber)' },
+function toDriveEmbedUrl(url: string | null): string | null {
+  if (!url) return null
+  const m1 = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/)
+  if (m1) return `https://drive.google.com/file/d/${m1[1]}/preview`
+  const m2 = url.match(/[?&]id=([\w-]+)/)
+  if (m2) return `https://drive.google.com/file/d/${m2[1]}/preview`
+  return url
 }
 
-export default function MediaClient({ knowledge: kInit, videos: vInit, isAdmin }: { knowledge: MediaItem[]; videos: MediaItem[]; isAdmin: boolean }) {
-  const [tab, setTab] = useState<'knowledge' | 'video'>('knowledge')
+const TAG_ICONS: Record<string, string> = {
+  Grammar: '📖', Vocabulary: '📝', Reading: '📚', Writing: '✏️',
+  Listening: '🎧', Speaking: '🗣️', Literature: '📜', Pronunciation: '🔊',
+}
+
+const TAG_COLORS: Record<string, { bg: string; color: string }> = {
+  Grammar:      { bg: 'rgba(0,80,203,0.08)',  color: '#0050cb' },
+  Vocabulary:   { bg: 'rgba(67,69,209,0.08)', color: '#4345d1' },
+  Reading:      { bg: 'rgba(0,104,119,0.08)', color: '#006877' },
+  Writing:      { bg: 'rgba(124,82,0,0.08)',  color: '#7c5200' },
+  Listening:    { bg: 'rgba(5,150,105,0.08)', color: '#059669' },
+  Speaking:     { bg: 'rgba(220,38,38,0.08)', color: '#dc2626' },
+  Literature:   { bg: 'rgba(139,92,246,0.08)',color: '#7c3aed' },
+  Pronunciation:{ bg: 'rgba(217,119,6,0.08)', color: '#d97706' },
+}
+
+const CSS = `
+  /* ── Page layout ── */
+  .mc-page { max-width: 1100px; margin: 0 auto; }
+
+  /* ── Page header ── */
+  .mc-page-header { margin-bottom: 28px; }
+  .mc-page-label {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--secondary);
+    display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  }
+  .mc-page-label::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--secondary); display: inline-block;
+  }
+  .mc-page-title {
+    font-size: 48px; font-weight: 900; letter-spacing: -0.04em;
+    color: var(--on-surface); line-height: 1.05; margin-bottom: 10px;
+  }
+  .mc-page-desc { font-size: 14px; color: var(--outline); line-height: 1.7; max-width: 520px; }
+
+  /* ── Top toolbar ── */
+  .mc-toolbar {
+    display: flex; align-items: center; gap: 10px;
+    margin-bottom: 28px; flex-wrap: wrap;
+  }
+  .mc-search-wrap { position: relative; flex: 1; min-width: 160px; max-width: 380px; }
+  .mc-search-icon {
+    position: absolute; left: 14px; top: 50%;
+    transform: translateY(-50%); color: var(--outline); pointer-events: none;
+  }
+  .mc-search {
+    width: 100%; padding: 10px 16px 10px 40px;
+    border: 1.5px solid var(--outline-variant);
+    border-radius: 999px; font-size: 13px; font-family: var(--font);
+    background: var(--surface-lowest); color: var(--text); outline: none;
+    transition: all 0.2s;
+  }
+  .mc-search:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(0,80,203,0.1); }
+
+  /* ── Filter pills ── */
+  .mc-pills {
+    display: flex; gap: 8px; overflow-x: auto;
+    padding-bottom: 2px; -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .mc-pills::-webkit-scrollbar { display: none; }
+  .mc-pill {
+    padding: 7px 18px; border-radius: 999px; font-size: 13px;
+    font-weight: 600; cursor: pointer; border: none; font-family: var(--font);
+    white-space: nowrap; transition: all 0.18s;
+    background: var(--surface-highest); color: var(--outline);
+  }
+  .mc-pill:hover { background: var(--surface-high); color: var(--text); }
+  .mc-pill.active {
+    background: linear-gradient(135deg, var(--primary), var(--primary-container));
+    color: white; box-shadow: 0 6px 16px rgba(0,80,203,0.2);
+  }
+
+  /* ── Section heading ── */
+  .mc-section-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 8px;
+  }
+  .mc-section-title { font-size: 22px; font-weight: 800; color: var(--on-surface); letter-spacing: -0.02em; }
+  .mc-see-all {
+    font-size: 13px; color: var(--primary); font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; gap: 4px;
+    background: none; border: none; font-family: var(--font);
+    padding: 4px 8px; border-radius: 8px; transition: background 0.15s;
+  }
+  .mc-see-all:hover { background: rgba(0,80,203,0.07); }
+
+  /* ── Desktop 2-column layout ── */
+  .mc-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1.6fr;
+    gap: 36px;
+    align-items: start;
+  }
+
+  /* ── Knowledge card (left column) ── */
+  .mc-k-card {
+    background: var(--surface-lowest);
+    border-radius: var(--r-2xl);
+    padding: 22px;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    transition: all 0.22s ease;
+    border: 1.5px solid transparent;
+    margin-bottom: 14px;
+  }
+  .mc-k-card:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateY(-2px);
+    border-color: rgba(0,80,203,0.1);
+  }
+  .mc-k-card-top {
+    display: flex; align-items: flex-start;
+    justify-content: space-between; gap: 10px; margin-bottom: 12px;
+  }
+  .mc-k-icon {
+    width: 46px; height: 46px; border-radius: 14px;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    background: linear-gradient(135deg, #EFF6FF, #DBEAFE); flex-shrink: 0;
+  }
+  .mc-tag-pill {
+    font-size: 10px; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 999px;
+    border: none; font-family: var(--font);
+  }
+  .mc-k-title { font-size: 15px; font-weight: 700; color: var(--on-surface); line-height: 1.4; margin-bottom: 6px; }
+  .mc-k-desc  { font-size: 12px; color: var(--outline); line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .mc-k-meta  { display: flex; align-items: center; gap: 14px; margin-top: 12px; }
+  .mc-k-meta-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--outline); font-weight: 500; }
+  .mc-read-more { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--primary); margin-top: 12px; }
+
+  /* ── Featured video (right top) ── */
+  .mc-featured-video {
+    border-radius: var(--r-2xl);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    cursor: pointer;
+    transition: all 0.22s;
+    background: var(--surface-lowest);
+    margin-bottom: 20px;
+  }
+  .mc-featured-video:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+  .mc-featured-thumb {
+    position: relative; width: 100%; padding-bottom: 52%;
+    background: linear-gradient(135deg, #0f172a, #1e293b);
+    overflow: hidden;
+  }
+  .mc-featured-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .mc-featured-overlay {
+    position: absolute; inset: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.1) 50%, transparent 100%);
+  }
+  .mc-featured-play {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 60px; height: 60px; border-radius: 50%;
+    background: rgba(255,255,255,0.2); backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.2s, background 0.2s;
+  }
+  .mc-featured-video:hover .mc-featured-play { transform: translate(-50%,-50%) scale(1.1); background: rgba(255,255,255,0.3); }
+  .mc-featured-duration {
+    position: absolute; bottom: 12px; right: 12px;
+    background: rgba(0,0,0,0.7); color: white; font-size: 12px;
+    font-weight: 700; padding: 3px 8px; border-radius: 6px;
+  }
+  .mc-featured-body { padding: 18px 20px; }
+  .mc-featured-label { font-size: 10px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--secondary); margin-bottom: 6px; }
+  .mc-featured-title { font-size: 18px; font-weight: 800; color: var(--on-surface); line-height: 1.35; margin-bottom: 6px; letter-spacing: -0.02em; }
+  .mc-featured-desc  { font-size: 13px; color: var(--outline); line-height: 1.6; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* ── Small video grid ── */
+  .mc-video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .mc-video-card {
+    background: var(--surface-lowest);
+    border-radius: var(--r-xl);
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow);
+  }
+  .mc-video-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+  .mc-video-thumb {
+    position: relative; width: 100%; padding-bottom: 56%;
+    background: #0f172a; overflow: hidden;
+  }
+  .mc-video-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .mc-video-play-sm {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(255,255,255,0.25); backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    transition: transform 0.18s;
+  }
+  .mc-video-card:hover .mc-video-play-sm { transform: translate(-50%,-50%) scale(1.12); }
+  .mc-video-duration-sm {
+    position: absolute; bottom: 6px; right: 6px;
+    background: rgba(0,0,0,0.65); color: white;
+    font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+  }
+  .mc-video-body { padding: 10px 12px; }
+  .mc-video-title { font-size: 12px; font-weight: 700; color: var(--on-surface); line-height: 1.4; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .mc-video-desc  { font-size: 11px; color: var(--outline); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+
+  /* ── Nav arrows ── */
+  .mc-nav-arrow {
+    width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--outline-variant);
+    background: var(--surface-lowest); cursor: pointer; display: flex; align-items: center;
+    justify-content: center; color: var(--outline); transition: all 0.18s;
+    box-shadow: var(--shadow-xs);
+  }
+  .mc-nav-arrow:hover { background: var(--primary); border-color: var(--primary); color: white; }
+
+  /* ── Pin badge ── */
+  .mc-pin-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 9px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    background: rgba(220,38,38,0.08); color: #dc2626;
+    padding: 2px 8px; border-radius: 999px; margin-bottom: 6px;
+  }
+
+  /* ── Mobile: full-width single column ── */
+  @media (max-width: 767px) {
+    .mc-page-title { font-size: 32px; }
+    .mc-page-desc  { font-size: 13px; }
+    .mc-two-col    { grid-template-columns: 1fr; gap: 0; }
+    .mc-video-grid { grid-template-columns: 1fr; }
+    .mc-k-card     { margin-bottom: 12px; }
+    .mc-featured-body { padding: 14px 16px; }
+    .mc-featured-title { font-size: 16px; }
+  }
+  @media (max-width: 480px) {
+    .mc-page-title { font-size: 28px; }
+    .mc-video-grid { grid-template-columns: 1fr 1fr; }
+  }
+`
+
+export default function MediaClient({
+  knowledge: kInit, videos: vInit, isAdmin,
+}: {
+  knowledge: MediaItem[]; videos: MediaItem[]; isAdmin: boolean
+}) {
+  const [tab, setTab] = useState<'all' | 'knowledge' | 'video'>('all')
   const [knowledge, setKnowledge] = useState(kInit)
   const [videos, setVideos] = useState(vInit)
   const [selected, setSelected] = useState<MediaItem | null>(null)
   const [addModal, setAddModal] = useState<'knowledge' | 'video' | null>(null)
   const [search, setSearch] = useState('')
+  const [featuredIdx, setFeaturedIdx] = useState(0)
   const supabase = createClient()
 
-  const filteredK = knowledge.filter(k => !search || k.title.toLowerCase().includes(search.toLowerCase()) || k.tags?.some(t => t.toLowerCase().includes(search.toLowerCase())))
-  const filteredV = videos.filter(v => !search || v.title.toLowerCase().includes(search.toLowerCase()))
+  // Sort pinned items to top
+  const sortedK = [...knowledge].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
+  const sortedV = [...videos].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
+
+  const filteredK = sortedK.filter(k =>
+    !search || k.title.toLowerCase().includes(search.toLowerCase()) ||
+    k.tags?.some(t => t.toLowerCase().includes(search.toLowerCase()))
+  )
+  const filteredV = sortedV.filter(v =>
+    !search || v.title.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const featuredVideo = filteredV[featuredIdx] ?? null
+  const gridVideos = filteredV.filter((_, i) => i !== featuredIdx).slice(0, 4)
+
+  async function togglePin(item: MediaItem) {
+    const newVal = !item.is_pinned
+    await supabase.from('media_items').update({ is_pinned: newVal }).eq('id', item.id)
+    if (item.type === 'knowledge') setKnowledge(p => p.map(k => k.id === item.id ? { ...k, is_pinned: newVal } : k))
+    else setVideos(p => p.map(v => v.id === item.id ? { ...v, is_pinned: newVal } : v))
+    toast.success(newVal ? '📌 ปักหมุดแล้ว' : 'ยกเลิกการปักหมุด')
+  }
 
   async function handleDelete(item: MediaItem) {
     if (!confirm('ยืนยันการลบ?')) return
@@ -93,241 +340,374 @@ export default function MediaClient({ knowledge: kInit, videos: vInit, isAdmin }
 
   async function handleAdd(form: Partial<MediaItem>) {
     const sb = createClient()
-    // Only set type if not already specified (for pdf/drive/video subtypes)
     const dataToInsert = form.type ? form : { ...form, type: addModal }
-    console.log('Inserting data:', JSON.stringify(dataToInsert, null, 2))
     const { data, error } = await sb.from('media_items').insert(dataToInsert).select().single()
-    if (error || !data) { 
-      console.error('Insert error:', error)
-      console.error('Insert error details:', JSON.stringify(error, null, 2))
-      toast.error(`เพิ่มไม่สำเร็จ: ${error?.message || error?.details || 'ข้อผิดพลาดที่ไม่รู้จัก'}`)
-      return 
+    if (error || !data) {
+      toast.error(`เพิ่มไม่สำเร็จ: ${error?.message || 'ข้อผิดพลาดที่ไม่รู้จัก'}`)
+      return
     }
-    if (addModal === 'knowledge') setKnowledge(p => [...p, { ...form, type: addModal, id: crypto.randomUUID() } as MediaItem])
-    else setVideos(p => [...p, { ...form, type: addModal, id: crypto.randomUUID() } as MediaItem])
+    if (addModal === 'knowledge') setKnowledge(p => [...p, { ...form, type: addModal, id: data.id } as MediaItem])
+    else setVideos(p => [...p, { ...form, type: addModal, id: data.id } as MediaItem])
     toast.success('เพิ่มสำเร็จ ✓')
     setAddModal(null)
   }
 
-  return (
-    <div style={{ maxWidth: 960, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-          <input className="input" style={{ paddingLeft: 32 }} placeholder="ค้นหาหัวข้อ..." value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
+  // Helper: get thumbnail for any media type
+  function getThumb(v: MediaItem): string | null {
+    if (v.type === 'video') return getYouTubeThumbnail(v.video_url)
+    if (v.type === 'drive') return getDriveThumbnail(v.drive_url ?? null)
+    return null
+  }
+
+  // Helper: type badge color
+  const TYPE_BADGE: Record<string, { label: string; bg: string; color: string }> = {
+    video:     { label: 'VIDEO',     bg: 'rgba(5,150,105,0.1)',  color: '#059669' },
+    pdf:       { label: 'PDF',       bg: 'rgba(220,38,38,0.08)', color: '#dc2626' },
+    drive:     { label: 'DRIVE',     bg: 'rgba(217,119,6,0.08)', color: '#d97706' },
+    knowledge: { label: 'ARTICLE',   bg: 'rgba(0,80,203,0.08)',  color: '#0050cb' },
+  }
+
+  // ── Knowledge section ──
+  const KnowledgeSection = () => (
+    <div>
+      <div className="mc-section-row">
+        <span className="mc-section-title">สรุปเนื้อหาสำคัญ</span>
         {isAdmin && (
-          <button className="btn btn-primary" onClick={() => setAddModal(tab)}>
-            <Plus size={14} /> เพิ่ม{tab === 'knowledge' ? 'เนื้อหา' : 'วีดีโอ/PDF/Drive'}
+          <button className="btn btn-primary btn-sm" onClick={() => setAddModal('knowledge')}>
+            <Plus size={13} /> เพิ่มบทความ
           </button>
         )}
       </div>
 
-      {/* Tabs */}
-      <div className="tab-bar" style={{ marginBottom: 24 }}>
-        <button className={`tab ${tab === 'knowledge' ? 'active' : ''}`} onClick={() => { setTab('knowledge'); setSearch('') }}>
-          <BookOpen size={14} style={{ display: 'inline', marginRight: 5 }} />คลังความรู้ <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 4 }}>({knowledge.length})</span>
-        </button>
-        <button className={`tab ${tab === 'video' ? 'active' : ''}`} onClick={() => { setTab('video'); setSearch('') }}>
-          <Video size={14} style={{ display: 'inline', marginRight: 5 }} />สื่อการสอน <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 4 }}>({videos.length})</span>
-        </button>
+      {filteredK.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--outline)' }}>
+          <BookOpen size={36} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+          <p style={{ fontSize: 14 }}>ยังไม่มีเนื้อหา</p>
+        </div>
+      ) : (
+        <div>
+          {filteredK.map(k => {
+            const mainTag = k.tags?.find(t => TAG_COLORS[t]) ?? k.tags?.[0]
+            const tagStyle = mainTag ? TAG_COLORS[mainTag] : { bg: 'rgba(0,80,203,0.08)', color: '#0050cb' }
+            const icon = k.tags?.find(t => TAG_ICONS[t]) ? TAG_ICONS[k.tags.find(t => TAG_ICONS[t])!] : '📄'
+            return (
+              <div key={k.id} className="mc-k-card fade-up" onClick={() => setSelected(k)}>
+                {k.is_pinned && <div className="mc-pin-badge"><Pin size={9} />ปักหมุด</div>}
+                <div className="mc-k-card-top">
+                  <div className="mc-k-icon">{icon}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {mainTag && (
+                      <span className="mc-tag-pill" style={{ background: tagStyle.bg, color: tagStyle.color, marginBottom: 6, display: 'inline-block' }}>
+                        {mainTag}
+                      </span>
+                    )}
+                    <h3 className="mc-k-title">{k.title}</h3>
+                    {k.description && <p className="mc-k-desc">{k.description}</p>}
+                  </div>
+                  {isAdmin && (
+                    <div style={{ display:'flex', gap:4, flexShrink:0 }}>
+                      <button
+                        className="btn btn-sm btn-ghost"
+                        title={k.is_pinned ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
+                        onClick={e => { e.stopPropagation(); togglePin(k) }}
+                        style={{ color: k.is_pinned ? 'var(--primary)' : 'var(--outline)' }}
+                      >
+                        {k.is_pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                      </button>
+                      <button className="btn btn-sm btn-danger" onClick={e => { e.stopPropagation(); handleDelete(k) }}>ลบ</button>
+                    </div>
+                  )}
+                </div>
+                {k.tags && k.tags.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 4 }}>
+                    {k.tags.slice(0, 3).map(t => (
+                      <span key={t} className="mc-tag-pill" style={{ background: (TAG_COLORS[t]?.bg ?? 'rgba(0,80,203,0.07)'), color: (TAG_COLORS[t]?.color ?? '#0050cb') }}>
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mc-read-more">อ่านเพิ่มเติม <ChevronRight size={13} /></div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+
+  // ── Video section ──
+  const VideoSection = () => (
+    <div>
+      {/* Section heading + arrows */}
+      <div className="mc-section-row">
+        <span className="mc-section-title">วิดีโอล่าสุด</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {isAdmin && (
+            <button className="btn btn-primary btn-sm" onClick={() => setAddModal('video')}>
+              <Plus size={13} /> เพิ่มสื่อ
+            </button>
+          )}
+          <button className="mc-nav-arrow" onClick={() => setFeaturedIdx(i => Math.max(0, i - 1))} disabled={featuredIdx === 0}>
+            <ArrowLeft size={16} />
+          </button>
+          <button className="mc-nav-arrow" onClick={() => setFeaturedIdx(i => Math.min(filteredV.length - 1, i + 1))} disabled={featuredIdx >= filteredV.length - 1}>
+            <ArrowRight size={16} />
+          </button>
+        </div>
       </div>
 
-      {/* Knowledge grid */}
-      {tab === 'knowledge' && (
-        <div>
-          {filteredK.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-3)' }}>
-              <BookOpen size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-              <p>ยังไม่มีเนื้อหา</p>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }} className="stagger">
-              {filteredK.map(k => {
-                const icon = k.tags?.find(t => ICONS[t]) ? ICONS[k.tags.find(t => ICONS[t])!] : '📄'
-                return (
-                  <div key={k.id} className="knowledge-card fade-up" onClick={() => setSelected(k)}>
-                    <div className="knowledge-card-header" style={{ background: 'linear-gradient(135deg, #F0F9FF, #EFF6FF)' }}>
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-                        <div style={{ fontSize: 32 }}>{icon}</div>
-                        {isAdmin && (
-                          <button className="btn btn-sm btn-danger" onClick={e => { e.stopPropagation(); handleDelete(k) }}>ลบ</button>
-                        )}
-                      </div>
-                      <h3 style={{ fontSize: 15, fontWeight: 700, marginTop: 10, marginBottom: 4 }}>{k.title}</h3>
-                      <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.5 }}>{k.description}</p>
-                    </div>
-                    <div className="knowledge-card-body">
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 10 }}>
-                        {k.tags?.map(t => <span key={t} className="badge badge-blue" style={{ fontSize: 10 }}><Tag size={8} />{t}</span>)}
-                      </div>
-                      {k.content && (
-                        <p style={{ fontSize: 12, color: 'var(--text-2)', lineHeight: 1.6, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {k.content}
-                        </p>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 10, fontSize: 12, color: 'var(--blue)', fontWeight: 600 }}>
-                        อ่านเพิ่มเติม <ChevronRight size={12} />
-                      </div>
-                    </div>
+      {filteredV.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--outline)' }}>
+          <Video size={36} style={{ margin: '0 auto 10px', opacity: 0.3 }} />
+          <p style={{ fontSize: 14 }}>ยังไม่มีสื่อการสอน</p>
+        </div>
+      ) : (
+        <>
+          {/* Featured video */}
+          {featuredVideo && (
+            <div className="mc-featured-video fade-up" onClick={() => setSelected(featuredVideo)}>
+              <div className="mc-featured-thumb">
+                {getThumb(featuredVideo) && (
+                  <img src={getThumb(featuredVideo)!} alt={featuredVideo.title}
+                    onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                )}
+                <div className="mc-featured-overlay" />
+                <div className="mc-featured-play">
+                  {featuredVideo.type === 'pdf'
+                    ? <FileText size={24} color="white" />
+                    : <Play size={26} color="white" fill="white" />}
+                </div>
+                {featuredVideo.duration && (
+                  <span className="mc-featured-duration">{featuredVideo.duration}</span>
+                )}
+                {/* Type badge */}
+                {(() => { const tb = TYPE_BADGE[featuredVideo.type]; return (
+                  <span style={{ position:'absolute', top:12, left:12, fontSize:10, fontWeight:800, letterSpacing:'0.08em', padding:'3px 9px', borderRadius:999, background:'rgba(255,255,255,0.15)', backdropFilter:'blur(6px)', color:'white' }}>
+                    {tb?.label}
+                  </span>
+                )})()}
+                {isAdmin && (
+                  <div style={{ position:'absolute', top:10, right:10, zIndex:2, display:'flex', gap:4 }}>
+                    <button
+                      className="btn btn-sm"
+                      style={{ background:'rgba(255,255,255,0.2)', backdropFilter:'blur(6px)', color:'white', padding:'4px 8px' }}
+                      onClick={e => { e.stopPropagation(); togglePin(featuredVideo) }}
+                      title={featuredVideo.is_pinned ? 'ยกเลิกปักหมุด' : 'ปักหมุด'}
+                    >
+                      {featuredVideo.is_pinned ? <PinOff size={13} /> : <Pin size={13} />}
+                    </button>
+                    <button className="btn btn-sm btn-danger" onClick={e => { e.stopPropagation(); handleDelete(featuredVideo) }}>ลบ</button>
                   </div>
-                )
-              })}
+                )}
+              </div>
+              <div className="mc-featured-body">
+                <p className="mc-featured-label">
+                  {featuredVideo.type === 'video' ? 'LIVE RECORDING' : featuredVideo.type === 'pdf' ? 'PDF DOCUMENT' : 'GOOGLE DRIVE'}
+                </p>
+                <h3 className="mc-featured-title">{featuredVideo.title}</h3>
+                {featuredVideo.description && (
+                  <p className="mc-featured-desc">{featuredVideo.description}</p>
+                )}
+              </div>
             </div>
           )}
+
+          {/* Grid of other videos */}
+          {gridVideos.length > 0 && (
+            <div className="mc-video-grid">
+              {gridVideos.map(v => (
+                <div key={v.id} className="mc-video-card fade-up" onClick={() => setSelected(v)}>
+                  <div className="mc-video-thumb">
+                    {getThumb(v) ? (
+                      <img src={getThumb(v)!} alt={v.title} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    ) : (
+                      <div style={{ position:'absolute', inset:0, background:'linear-gradient(135deg,#1e293b,#334155)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                        {v.type === 'pdf' ? <FileText size={28} color="rgba(255,255,255,0.4)" /> : <Play size={28} color="rgba(255,255,255,0.4)" />}
+                      </div>
+                    )}
+                    <div className="mc-video-play-sm">
+                      {v.type === 'pdf' ? <FileText size={16} color="white" /> : <Play size={16} color="white" fill="white" />}
+                    </div>
+                    {v.duration && <span className="mc-video-duration-sm">{v.duration}</span>}
+                    {v.is_pinned && (
+                      <span style={{ position:'absolute', top:6, left:6, background:'rgba(220,38,38,0.85)', color:'white', fontSize:9, fontWeight:800, padding:'2px 7px', borderRadius:999, letterSpacing:'0.06em' }}>📌 PIN</span>
+                    )}
+                    {isAdmin && (
+                      <div style={{ position:'absolute', top:6, right:6, zIndex:2, display:'flex', gap:3 }}>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background:'rgba(0,0,0,0.5)', color:'white', padding:'3px 7px', fontSize:10 }}
+                          onClick={e => { e.stopPropagation(); togglePin(v) }}
+                        >
+                          {v.is_pinned ? <PinOff size={11} /> : <Pin size={11} />}
+                        </button>
+                        <button className="btn btn-sm btn-danger" style={{ fontSize:10, padding:'3px 8px' }} onClick={e => { e.stopPropagation(); handleDelete(v) }}>ลบ</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mc-video-body">
+                    <h4 className="mc-video-title">{v.title}</h4>
+                    {v.description && <p className="mc-video-desc">{v.description}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+
+  return (
+    <div className="mc-page">
+      <style>{CSS}</style>
+
+      {/* ── Page Header ── */}
+      <div className="mc-page-header fade-up">
+        <p className="mc-page-label">Resource Center</p>
+        <h1 className="mc-page-title">สื่อการเรียนรู้</h1>
+        <p className="mc-page-desc">
+          คลังบทความ วิดีโอ และสื่อการสอนภาษาอังกฤษ ครบครัน พร้อมใช้งาน
+        </p>
+      </div>
+
+      {/* ── Toolbar: Search + Filter pills ── */}
+      <div className="mc-toolbar">
+        <div className="mc-search-wrap">
+          <Search size={15} className="mc-search-icon" />
+          <input
+            className="mc-search"
+            placeholder="ค้นหาหัวข้อ, แท็ก..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="mc-pills">
+          <button className={`mc-pill ${tab === 'all' ? 'active' : ''}`} onClick={() => { setTab('all'); setSearch('') }}>ทั้งหมด</button>
+          <button className={`mc-pill ${tab === 'knowledge' ? 'active' : ''}`} onClick={() => { setTab('knowledge'); setSearch('') }}>
+            <BookOpen size={12} style={{ display:'inline', marginRight:5, verticalAlign:'middle' }} />คลังความรู้
+          </button>
+          <button className={`mc-pill ${tab === 'video' ? 'active' : ''}`} onClick={() => { setTab('video'); setSearch('') }}>
+            <Video size={12} style={{ display:'inline', marginRight:5, verticalAlign:'middle' }} />สื่อการสอน
+          </button>
+        </div>
+      </div>
+
+      {/* ── Main Content ── */}
+      {(tab === 'all' || tab === 'knowledge' || tab === 'video') && (
+        <div className={tab === 'all' ? 'mc-two-col' : ''}>
+
+          {/* Left: Knowledge */}
+          {(tab === 'all' || tab === 'knowledge') && <KnowledgeSection />}
+
+          {/* Right: Videos */}
+          {(tab === 'all' || tab === 'video') && <VideoSection />}
+
         </div>
       )}
 
-      {/* Video/PDF/Drive grid */}
-      {tab === 'video' && (
-        <div>
-          {filteredV.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-3)' }}>
-              <Video size={40} style={{ margin: '0 auto 12px', opacity: 0.3 }} />
-              <p>ยังไม่มีสื่อการสอน</p>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 16 }} className="stagger">
-              {filteredV.map(v => {
-                const tinfo = TYPE_LABELS[v.type as keyof typeof TYPE_LABELS] ?? TYPE_LABELS.video
-                return (
-                  <div key={v.id} className="video-card fade-up" onClick={() => setSelected(v)}>
-                    <div className="video-thumb" style={{ background: `linear-gradient(135deg, ${tinfo.color}, #F8FAFC)`, overflow: 'hidden', position: 'relative' }}>
-                      {/* Real preview thumbnail */}
-                      {v.type === 'video' && getYouTubeThumbnail(v.video_url) ? (
-                        <img
-                          src={getYouTubeThumbnail(v.video_url)!}
-                          alt={v.title}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                        />
-                      ) : v.type === 'drive' && getDriveThumbnail(v.drive_url) ? (
-                        <img
-                          src={getDriveThumbnail(v.drive_url)!}
-                          alt={v.title}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                          onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
-                        />
-                      ) : v.type === 'pdf' && v.file_url ? (
-                        <iframe
-                          src={`https://docs.google.com/viewer?url=${encodeURIComponent(v.file_url)}&embedded=true`}
-                          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 'none', pointerEvents: 'none', transform: 'scale(1)', transformOrigin: 'top left' }}
-                          title="preview"
-                        />
-                      ) : null}
-                      {/* Overlay play/icon button */}
-                      <div className="video-play" style={{ background: tinfo.tc, zIndex: 2 }}>
-                        {v.type === 'pdf' ? <FileText size={20} color="white" /> :
-                         v.type === 'drive' ? <Link size={20} color="white" /> :
-                         <Play size={20} color="white" fill="white" />}
-                      </div>
-                      {v.duration && <span style={{ position: 'absolute', bottom: 8, right: 8, background: 'rgba(0,0,0,0.6)', color: 'white', fontSize: 11, padding: '2px 6px', borderRadius: 4, zIndex: 2 }}>{v.duration}</span>}
-                      <span style={{ position: 'absolute', top: 8, left: 8, zIndex: 2 }} className={`badge badge-${v.type === 'pdf' ? 'red' : v.type === 'drive' ? 'amber' : 'green'}`}>{tinfo.label}</span>
-                    </div>
-                    <div style={{ padding: '12px 14px' }}>
-                      <h3 style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4, marginBottom: 5 }}>{v.title}</h3>
-                      <p style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{v.description}</p>
-                      {isAdmin && <button className="btn btn-sm btn-danger" style={{ marginTop: 8 }} onClick={e => { e.stopPropagation(); handleDelete(v) }}>ลบ</button>}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Detail modal */}
-      {selected && (
+      {selected && createPortal(
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setSelected(null)}>
-          <div className="modal" style={{ maxWidth: 640 }}>
+          <div className="modal" style={{ maxWidth: 680 }}>
             <div className="modal-header">
-              <h3 style={{ fontWeight: 700, fontSize: 16 }}>{selected.title}</h3>
-              <button className="btn btn-icon btn-ghost" onClick={() => setSelected(null)}><X size={16} /></button>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--secondary)', marginBottom: 4 }}>
+                  {selected.type === 'video' ? 'VIDEO' : selected.type === 'pdf' ? 'PDF' : selected.type === 'drive' ? 'DRIVE' : 'ARTICLE'}
+                </div>
+                <h3 style={{ fontWeight: 800, fontSize: 17, lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selected.title}</h3>
+              </div>
+              <button className="btn btn-icon btn-ghost" style={{ marginLeft: 8, flexShrink: 0 }} onClick={() => setSelected(null)}><X size={16} /></button>
             </div>
             <div className="modal-body">
-              {/* Video */}
+
+              {/* Video embed */}
               {selected.type === 'video' && (
                 <div style={{ borderRadius: 'var(--r-lg)', overflow: 'hidden', marginBottom: 16, background: '#000', aspectRatio: '16/9', position: 'relative' }}>
                   {selected.video_url
-                    ? <iframe src={toEmbedUrl(selected.video_url) ?? undefined} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', border: 'none' }} allowFullScreen title={selected.title} />
-                    : <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', position: 'absolute', inset: 0 }}><Play size={40} color="var(--blue)" /><p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 8 }}>ยังไม่มี URL วีดีโอ</p></div>}
+                    ? <iframe src={toEmbedUrl(selected.video_url) ?? undefined} style={{ position:'absolute', top:0, left:0, width:'100%', height:'100%', border:'none' }} allowFullScreen title={selected.title} />
+                    : <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', position:'absolute', inset:0 }}>
+                        <Play size={40} color="rgba(255,255,255,0.4)" />
+                        <p style={{ fontSize:12, color:'rgba(255,255,255,0.4)', marginTop:8 }}>ยังไม่มี URL วีดีโอ</p>
+                      </div>}
                 </div>
               )}
 
-              {/* PDF */}
+              {/* PDF embed */}
               {selected.type === 'pdf' && (
-                <div style={{ marginBottom: 16 }}>
-                  {selected.file_url ? (
-                    <div style={{ borderRadius: 'var(--r-lg)', overflow: 'hidden', border: '1px solid var(--border)', height: 480 }}>
-                      <iframe src={selected.file_url ?? undefined} style={{ width: '100%', height: '100%', border: 'none' }} title={selected.title} />
-                    </div>
-                  ) : (
-                    <div style={{ padding: 20, background: 'var(--red-light)', borderRadius: 'var(--r-md)', textAlign: 'center', color: 'var(--red)' }}>
-                      <FileText size={32} style={{ margin: '0 auto 8px' }} />
-                      <p style={{ fontSize: 13 }}>ยังไม่มีไฟล์ PDF</p>
-                    </div>
-                  )}
-                  {selected.file_url && (
-                    <a href={selected.file_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm" style={{ marginTop: 8 }}>
-                      <FileText size={12} /> เปิดไฟล์ PDF
-                    </a>
-                  )}
+                <div style={{ marginBottom: 16, borderRadius: 'var(--r-lg)', overflow: 'hidden', border: '1px solid var(--border)', height: 440 }}>
+                  {selected.file_url
+                    ? <iframe src={selected.file_url} style={{ width:'100%', height:'100%', border:'none' }} title={selected.title} />
+                    : <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', background:'var(--surface-low)' }}>
+                        <FileText size={40} color="var(--outline)" />
+                        <p style={{ fontSize:13, color:'var(--outline)', marginTop:8 }}>ยังไม่มีไฟล์ PDF</p>
+                      </div>}
                 </div>
               )}
 
-              {/* Google Drive */}
+              {/* Drive embed */}
               {selected.type === 'drive' && (
-                <div style={{ marginBottom: 16 }}>
-                  {selected.drive_url ? (
-                    <div style={{ borderRadius: 'var(--r-lg)', overflow: 'hidden', border: '1px solid var(--border)', height: 480 }}>
-                      <iframe src={toDriveEmbedUrl(selected.drive_url) ?? undefined} style={{ width: '100%', height: '100%', border: 'none' }} title={selected.title} allowFullScreen />
-                    </div>
-                  ) : (
-                    <div style={{ padding: 20, background: 'var(--amber-light)', borderRadius: 'var(--r-md)', textAlign: 'center', color: 'var(--amber)' }}>
-                      <Link size={32} style={{ margin: '0 auto 8px' }} />
-                      <p style={{ fontSize: 13 }}>ยังไม่มีลิงก์ Google Drive</p>
-                    </div>
-                  )}
-                  {selected.drive_url && (
-                    <a href={selected.drive_url} target="_blank" rel="noopener noreferrer" className="btn btn-sm" style={{ marginTop: 8 }}>
-                      <Link size={12} /> เปิดใน Google Drive
-                    </a>
-                  )}
+                <div style={{ marginBottom: 16, borderRadius: 'var(--r-lg)', overflow: 'hidden', border: '1px solid var(--border)', height: 440 }}>
+                  {selected.drive_url
+                    ? <iframe src={toDriveEmbedUrl(selected.drive_url) ?? undefined} style={{ width:'100%', height:'100%', border:'none' }} title={selected.title} allowFullScreen />
+                    : <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%', background:'var(--surface-low)' }}>
+                        <ExternalLink size={40} color="var(--outline)" />
+                        <p style={{ fontSize:13, color:'var(--outline)', marginTop:8 }}>ยังไม่มีลิงก์ Drive</p>
+                      </div>}
                 </div>
               )}
 
-              {/* Knowledge icon */}
-              {selected.type === 'knowledge' && (
-                <div style={{ background: 'linear-gradient(135deg,#F0F9FF,#EFF6FF)', borderRadius: 'var(--r-lg)', padding: '16px', marginBottom: 16, fontSize: 28, textAlign: 'center' }}>
-                  {selected.tags?.find(t => ICONS[t]) ? ICONS[selected.tags.find(t => ICONS[t])!] : '📄'}
+              {/* Knowledge content */}
+              {selected.type === 'knowledge' && selected.content && (
+                <div style={{ background: 'var(--surface-low)', borderRadius: 'var(--r-lg)', padding: '18px 20px', marginBottom: 16, maxHeight: 320, overflowY: 'auto' }}>
+                  <p style={{ fontSize: 14, lineHeight: 1.9, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>{selected.content}</p>
                 </div>
               )}
 
-              {selected.description && <p style={{ fontSize: 13, color: 'var(--text-2)', marginBottom: 12, lineHeight: 1.7 }}>{selected.description}</p>}
-              {selected.content && (
-                <div style={{ background: '#FAFAFA', borderRadius: 'var(--r-md)', padding: '14px 16px', fontSize: 13, lineHeight: 1.8, color: 'var(--text)', whiteSpace: 'pre-wrap', border: '1px solid var(--border)', maxHeight: 300, overflowY: 'auto' }}>
-                  {selected.content}
-                </div>
+              {/* Description */}
+              {selected.description && (
+                <p style={{ fontSize: 13, color: 'var(--outline)', lineHeight: 1.7, marginBottom: 12 }}>{selected.description}</p>
               )}
-              {selected.tags?.length > 0 && (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 12 }}>
-                  {selected.tags.map(t => <span key={t} className="badge badge-blue">{t}</span>)}
+
+              {/* Tags */}
+              {selected.tags && selected.tags.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {selected.tags.map(t => (
+                    <span key={t} className="mc-tag-pill" style={{ background: TAG_COLORS[t]?.bg ?? 'rgba(0,80,203,0.08)', color: TAG_COLORS[t]?.color ?? '#0050cb' }}>
+                      {TAG_ICONS[t] && <span style={{ marginRight: 4 }}>{TAG_ICONS[t]}</span>}{t}
+                    </span>
+                  ))}
                 </div>
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
-      {/* Add modal */}
-      {addModal && <AddModal type={addModal} onClose={() => setAddModal(null)} onSave={handleAdd} supabase={supabase} />}
+      {/* ── Add Modal ── */}
+      {addModal && createPortal(
+        <AddModal
+          type={addModal}
+          onClose={() => setAddModal(null)}
+          onSave={handleAdd}
+          supabase={supabase}
+        />,
+        document.body
+      )}
     </div>
   )
 }
 
-function AddModal({ type, onClose, onSave, supabase }: { type: 'knowledge' | 'video'; onClose: () => void; onSave: (f: Partial<MediaItem>) => void; supabase: ReturnType<typeof createClient> }) {
+// ─── Add Modal ────────────────────────────────────────────────────────────────
+function AddModal({
+  type, onClose, onSave, supabase,
+}: {
+  type: 'knowledge' | 'video'
+  onClose: () => void
+  onSave: (f: Partial<MediaItem>) => void
+  supabase: ReturnType<typeof createClient>
+}) {
   const [subType, setSubType] = useState<'video' | 'pdf' | 'drive'>('video')
   const [form, setForm] = useState<Partial<MediaItem>>({ tags: [] })
   const [tagInput, setTagInput] = useState('')
@@ -338,52 +718,23 @@ function AddModal({ type, onClose, onSave, supabase }: { type: 'knowledge' | 'vi
   async function save() {
     if (!form.title?.trim()) { toast.error('กรุณาใส่ชื่อ'); return }
     setSaving(true)
-
     let finalForm = { ...form }
 
-    // อัพโหลด PDF ถ้ามี
     if (type === 'video' && subType === 'pdf' && pdfFile) {
       setUploading(true)
       try {
         const { data: { session } } = await supabase.auth.getSession()
-        if (!session) { 
-          toast.error('ไม่ได้ลงชื่นเข้า ต้องลงชื่นเข้าใหม่'); 
-          setSaving(false); 
-          setUploading(false); 
-          return 
-        }
-        
-        const ext = pdfFile.name.split(`.`).pop() ?? `pdf`
+        if (!session) { toast.error('ไม่ได้ลงชื่อเข้า'); setSaving(false); setUploading(false); return }
+        const ext = pdfFile.name.split('.').pop() ?? 'pdf'
         const path = `pdfs/${Date.now()}.${ext}`
-        
-        console.log('Uploading to:', path, 'File size:', pdfFile.size)
-        
-        const { data, error } = await supabase.storage.from('media').upload(path, pdfFile, { upsert: true })
-        if (error) { 
-          console.error('Upload error:', error)
-          toast.error(`อัพโหลดไม่สำเร็จ: ${error.message || 'ข้อผิดพลาดที่ไม่รู้จัก'}`)
-          setSaving(false)
-          setUploading(false)
-          return 
-        }
-        
+        const { error } = await supabase.storage.from('media').upload(path, pdfFile, { upsert: true })
+        if (error) { toast.error(`อัพโหลดไม่สำเร็จ: ${error.message}`); setSaving(false); setUploading(false); return }
         const { data: urlData } = supabase.storage.from('media').getPublicUrl(path)
-        if (!urlData?.publicUrl) {
-          toast.error('ไม่สามารถสร้าง URL สาธารณะได้')
-          setSaving(false)
-          setUploading(false)
-          return
-        }
-        
         finalForm.file_url = urlData.publicUrl
         finalForm.type = 'pdf' as any
-        toast.success('อัพโหลด PDF สำเร็จ ✓')
       } catch (err) {
-        console.error('Upload exception:', err)
         toast.error(`ข้อผิดพลาด: ${err instanceof Error ? err.message : 'ไม่รู้จัก'}`)
-        setSaving(false)
-        setUploading(false)
-        return
+        setSaving(false); setUploading(false); return
       }
       setUploading(false)
     } else if (type === 'video' && subType === 'drive') {
@@ -396,25 +747,22 @@ function AddModal({ type, onClose, onSave, supabase }: { type: 'knowledge' | 'vi
     setSaving(false)
   }
 
-  const actualType = type === 'video' ? subType : type
-
-  return (
+  return createPortal(
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <div className="modal-header">
-          <h3 style={{ fontWeight: 700 }}>เพิ่ม{type === 'knowledge' ? 'เนื้อหา' : 'สื่อการสอน'}</h3>
+          <h3 style={{ fontWeight: 700 }}>เพิ่ม{type === 'knowledge' ? 'บทความ' : 'สื่อการสอน'}</h3>
           <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* ประเภทสื่อ (เฉพาะ tab วีดีโอ) */}
           {type === 'video' && (
             <div>
               <label className="form-label">ประเภทสื่อ</label>
               <div style={{ display: 'flex', gap: 8 }}>
                 {(['video', 'pdf', 'drive'] as const).map(t => (
                   <button key={t} onClick={() => setSubType(t)} className={`btn btn-sm ${subType === t ? 'btn-primary' : ''}`}>
-                    {t === 'video' ? '🎬 วีดีโอ' : t === 'pdf' ? '📕 PDF' : '📁 Google Drive'}
+                    {t === 'video' ? '🎬 วีดีโอ' : t === 'pdf' ? '📕 PDF' : '📁 Drive'}
                   </button>
                 ))}
               </div>
@@ -424,52 +772,41 @@ function AddModal({ type, onClose, onSave, supabase }: { type: 'knowledge' | 'vi
           <div><label className="form-label">ชื่อหัวข้อ *</label><input className="input" value={form.title ?? ''} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
           <div><label className="form-label">คำอธิบาย</label><input className="input" value={form.description ?? ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
 
-          {/* เนื้อหาบทความ */}
           {type === 'knowledge' && (
-            <div><label className="form-label">เนื้อหา</label><textarea className="input" rows={5} value={form.content ?? ''} onChange={e => setForm(p => ({ ...p, content: e.target.value }))} /></div>
+            <div><label className="form-label">เนื้อหา</label><textarea className="input" rows={5} style={{ borderRadius: 'var(--r-lg)', resize: 'vertical' }} value={form.content ?? ''} onChange={e => setForm(p => ({ ...p, content: e.target.value }))} /></div>
           )}
-
-          {/* วีดีโอ */}
           {type === 'video' && subType === 'video' && (
             <>
               <div><label className="form-label">URL วีดีโอ (YouTube)</label><input className="input" placeholder="https://www.youtube.com/watch?v=..." value={form.video_url ?? ''} onChange={e => setForm(p => ({ ...p, video_url: e.target.value }))} /></div>
               <div><label className="form-label">ความยาว</label><input className="input" placeholder="12:34" value={form.duration ?? ''} onChange={e => setForm(p => ({ ...p, duration: e.target.value }))} /></div>
             </>
           )}
-
-          {/* PDF Upload */}
           {type === 'video' && subType === 'pdf' && (
             <div>
               <label className="form-label">ไฟล์ PDF</label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1.5px dashed var(--border-md)', borderRadius: 'var(--r-md)', padding: 12, cursor: 'pointer', background: pdfFile ? 'var(--red-light)' : '' }}>
-                <FileText size={16} color={pdfFile ? 'var(--red)' : 'var(--text-3)'} />
-                <span style={{ fontSize: 13, color: pdfFile ? 'var(--red)' : 'var(--text-2)' }}>{pdfFile?.name ?? 'คลิกเลือกไฟล์ PDF...'}</span>
-                <input type="file" accept=".pdf" style={{ display: 'none' }} onChange={e => setPdfFile(e.target.files?.[0] ?? null)} />
+              <label style={{ display:'flex', alignItems:'center', gap:8, border:'1.5px dashed var(--outline-variant)', borderRadius:'var(--r-md)', padding:12, cursor:'pointer', background: pdfFile ? 'var(--error-container)' : '' }}>
+                <FileText size={16} color={pdfFile ? 'var(--error)' : 'var(--outline)'} />
+                <span style={{ fontSize:13, color: pdfFile ? 'var(--error)' : 'var(--outline)' }}>{pdfFile?.name ?? 'คลิกเลือกไฟล์ PDF...'}</span>
+                <input type="file" accept=".pdf" style={{ display:'none' }} onChange={e => setPdfFile(e.target.files?.[0] ?? null)} />
               </label>
-              {uploading && <p style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>กำลังอัพโหลด...</p>}
             </div>
           )}
-
-          {/* Google Drive */}
           {type === 'video' && subType === 'drive' && (
             <div>
               <label className="form-label">ลิงก์ Google Drive</label>
               <input className="input" placeholder="https://drive.google.com/file/d/..." value={form.drive_url ?? ''} onChange={e => setForm(p => ({ ...p, drive_url: e.target.value }))} />
-              <p style={{ fontSize: 11, color: 'var(--text-3)', marginTop: 4 }}>💡 ตั้งค่าไฟล์เป็น "ทุกคนที่มีลิงก์" ก่อนวาง URL</p>
+              <p style={{ fontSize:11, color:'var(--outline)', marginTop:4 }}>💡 ตั้งค่าไฟล์เป็น "ทุกคนที่มีลิงก์" ก่อนวาง URL</p>
             </div>
           )}
 
-          {/* แท็ก */}
           <div>
             <label className="form-label">แท็ก</label>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-              <input className="input" value={tagInput} onChange={e => setTagInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (tagInput.trim()) { setForm(p => ({ ...p, tags: [...(p.tags ?? []), tagInput.trim()] })); setTagInput('') } } }}
-                placeholder="พิมพ์แล้วกด Enter" />
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            <input className="input" value={tagInput} placeholder="พิมพ์แล้วกด Enter"
+              onChange={e => setTagInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (tagInput.trim()) { setForm(p => ({ ...p, tags: [...(p.tags ?? []), tagInput.trim()] })); setTagInput('') } } }} />
+            <div style={{ display:'flex', flexWrap:'wrap', gap:5, marginTop:6 }}>
               {form.tags?.map((t, i) => (
-                <span key={i} className="badge badge-blue" style={{ cursor: 'pointer' }} onClick={() => setForm(p => ({ ...p, tags: p.tags?.filter((_, j) => j !== i) }))}>
+                <span key={i} className="badge badge-blue" style={{ cursor:'pointer' }} onClick={() => setForm(p => ({ ...p, tags: p.tags?.filter((_, j) => j !== i) }))}>
                   {t} ×
                 </span>
               ))}
@@ -483,6 +820,7 @@ function AddModal({ type, onClose, onSave, supabase }: { type: 'knowledge' | 'vi
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }

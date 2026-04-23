@@ -69,7 +69,7 @@ export default function ProfileClient({ profile: init, submissions, userId }: { 
 
       {/* Score summary */}
       {submissions.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px,1fr))', gap: 12 }}>
           {[
             { label: 'คะแนนเฉลี่ย', value: `${avgScore}%`, icon: TrendingUp, color: 'var(--blue)' },
             { label: 'ผ่านแล้ว', value: `${passed}/${submissions.length}`, icon: CheckCircle, color: 'var(--green)' },

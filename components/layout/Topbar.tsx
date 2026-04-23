@@ -30,25 +30,35 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
 
   return (
     <header style={{
-      height: 64,
-      background: 'rgba(249,249,255,0.85)',
+      height: 56,
+      background: 'rgba(249,249,255,0.9)',
       backdropFilter: 'blur(20px)',
       WebkitBackdropFilter: 'blur(20px)',
       borderBottom: 'none',
-      boxShadow: '0 10px 30px rgba(20,27,43,0.04)',
-      backgroundImage: 'linear-gradient(to bottom, rgba(241,243,255,0.6), transparent)',
+      boxShadow: '0 4px 20px rgba(20,27,43,0.05)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 28px', flexShrink: 0, position: 'sticky', top: 0, zIndex: 30,
+      padding: '0 16px', flexShrink: 0, position: 'sticky', top: 0, zIndex: 30,
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <style>{`
+        .tb-title { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+        .tb-bell, .tb-settings { display: flex; }
+        @media (max-width: 480px) {
+          .tb-bell, .tb-settings { display: none; }
+          .tb-title { max-width: 140px; font-size: 15px; }
+        }
+      `}</style>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+        {/* Hamburger button */}
         {/* Hamburger button */}
         <button
           onClick={onMenuClick}
           title="เปิด/ปิดเมนู"
+          className="hidden sm:flex" // 1. เพิ่ม className ตรงนี้ (ซ่อนในมือถือ, แสดงเป็น flex ในจอใหญ่)
           style={{
-            width: 40, height: 40, borderRadius: 12, border: 'none',
+            width: 38, height: 38, borderRadius: 10, border: 'none', flexShrink: 0,
             background: 'transparent', cursor: 'pointer',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            // display: 'flex',      // 2. ลบบรรทัดนี้ออก หรือคอมเมนต์ไว้
+            alignItems: 'center', justifyContent: 'center',
             color: 'var(--outline)', transition: 'background 0.2s, color 0.2s',
           }}
           onMouseEnter={e => { e.currentTarget.style.background = 'rgba(0,80,203,0.09)'; e.currentTarget.style.color = '#0050cb' }}
@@ -57,12 +67,12 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
           <Menu size={20} />
         </button>
 
-        <span style={{ fontWeight: 900, fontSize: 20, color: '#0050cb', letterSpacing: '-0.03em' }}>
-          English Class Manager
+        <span className="tb-title" style={{ fontWeight: 900, color: '#0050cb', letterSpacing: '-0.03em' }}>
+          English Class
         </span>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
         {/* Semester display / edit */}
         {editing && isAdmin ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -101,10 +111,10 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
           </span>
         )}
 
-        <button style={{
-          width: 40, height: 40, borderRadius: '50%', border: 'none',
+        <button className="tb-bell" style={{
+          width: 38, height: 38, borderRadius: '50%', border: 'none',
           background: 'transparent', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          alignItems: 'center', justifyContent: 'center',
           color: 'var(--outline)', transition: 'background 0.2s',
         }}
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
@@ -113,10 +123,10 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
           <Bell size={18} />
         </button>
 
-        <button style={{
-          width: 40, height: 40, borderRadius: '50%', border: 'none',
+        <button className="tb-settings" style={{
+          width: 38, height: 38, borderRadius: '50%', border: 'none',
           background: 'transparent', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          alignItems: 'center', justifyContent: 'center',
           color: 'var(--outline)', transition: 'background 0.2s',
         }}
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}

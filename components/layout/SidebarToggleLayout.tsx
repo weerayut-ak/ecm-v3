@@ -27,7 +27,7 @@ export default function SidebarToggleLayout({ profile, children }: { profile: Pr
       {/* Main content */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <Topbar profile={profile} onMenuClick={() => setSidebarOpen(o => !o)} />
-        <main style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 80px', WebkitOverflowScrolling: 'touch' }}>
+        <main style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 96px', WebkitOverflowScrolling: 'touch' }}>
           <div className="fade-up">{children}</div>
         </main>
       </div>

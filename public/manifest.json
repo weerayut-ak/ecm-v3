@@ -1,0 +1,14 @@
+{
+  "name": "English Class Manager",
+  "short_name": "ECM",
+  "description": "ระบบจัดการนักเรียนวิชาภาษาอังกฤษ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f9f9ff",
+  "theme_color": "#0050cb",
+  "orientation": "portrait-primary",
+  "icons": [
+    { "src": "/logo.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/logo.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

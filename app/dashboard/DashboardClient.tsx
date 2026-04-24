@@ -2,6 +2,7 @@
 import Link from 'next/link'
 import { BookOpen, Megaphone, ClipboardList, ArrowRight, Users, Play, Zap } from 'lucide-react'
 
+
 interface Props {
   profile: any
   stats: { students: number; quizzes: number; announcements: number; media: number }
@@ -10,7 +11,7 @@ interface Props {
 }
 
 const STAT_CARDS = (stats: Props['stats']) => [
-  { href:'/dashboard/students',      icon:Users,        label:'นักเรียน',   value:stats.students,      unit:'คน',     bg:'rgba(0,80,203,0.07)',  color:'var(--primary)'   },
+  { href:'/dashboard/students',      icon:Users,        label:'นักเรียน',   value:stats.students,      unit:'คน',    bg:'rgba(0,80,203,0.07)',  color:'var(--primary)'   },
   { href:'/dashboard/media',         icon:BookOpen,     label:'สื่อการสอน', value:stats.media,         unit:'รายการ', bg:'rgba(0,104,119,0.07)', color:'var(--secondary)' },
   { href:'/dashboard/announcements', icon:Megaphone,    label:'ประกาศ',     value:stats.announcements, unit:'รายการ', bg:'rgba(124,82,0,0.07)',  color:'#7c5200'          },
   { href:'/dashboard/quizzes',       icon:ClipboardList,label:'แบบทดสอบ',  value:stats.quizzes,       unit:'ชุด',    bg:'rgba(67,69,209,0.07)', color:'var(--tertiary)'  },
@@ -89,16 +90,109 @@ export default function DashboardClient({ profile, stats, recentAnnouncements, o
           .db-hero-title { font-size: 20px; }
           .db-stat-grid  { grid-template-columns: repeat(2,1fr); }
         }
+
+        /* --- Animation สำหรับตัวอักษร School --- */
+        .dash {
+          animation: dashArray 2s ease-in-out infinite, dashOffset 2s linear infinite;
+        }
+        @keyframes dashArray {
+          0% { stroke-dasharray: 0 1 359 0; }
+          50% { stroke-dasharray: 0 359 1 0; }
+          100% { stroke-dasharray: 359 1 0 0; }
+        }
+        @keyframes dashOffset {
+          0% { stroke-dashoffset: 365; }
+          100% { stroke-dashoffset: 5; }
+        }
+
+        /* --- แอนิเมชันวาดเส้นจาก Uiverse --- */
+        .dash {
+          animation: dashArray 2s ease-in-out infinite, dashOffset 2s linear infinite;
+        }
+
+        @keyframes dashArray {
+          0%   { stroke-dasharray: 0 1 359 0; }
+          50%  { stroke-dasharray: 0 359 1 0; }
+          100% { stroke-dasharray: 359 1 0 0; }
+        }
+
+        @keyframes dashOffset {
+          0%   { stroke-dashoffset: 365; }
+          100% { stroke-dashoffset: 5; }
+        }
+
       `}</style>
 
-      {/* ── Welcome ── */}
+{/* ── Welcome ── */}
       <div className="fade-up" style={{ marginBottom: 4 }}>
         <p style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--primary)', marginBottom: 6 }}>
           Student Dashboard
         </p>
         <h2 className="db-title">
-          Welcome back,<br />
-          <span className="text-gradient">{name}</span> 👋
+          
+          {/* --- SVG คำว่า School สไตล์คล้าย YOU --- */}
+          <svg 
+            width="180" 
+            height="55" 
+            viewBox="0 0 180 55" 
+            style={{ display: 'inline-block', verticalAlign: 'bottom' }}
+          >
+            {/* โค้ดสี Gradient จาก Uiverse */}
+            <defs>
+              {/* grad-b: สีม่วงไล่ไปฟ้า */}
+              <linearGradient gradientUnits="userSpaceOnUse" y2="2" x2="0" y1="62" x1="0" id="grad-b">
+                <stop stopColor="#973BED"></stop>
+                <stop stopColor="#007CFF" offset="1"></stop>
+              </linearGradient>
+              
+              {/* grad-c: สีเหลืองไล่ไปชมพู (มีแอนิเมชันหมุนสี) */}
+              <linearGradient gradientUnits="userSpaceOnUse" y2="0" x2="0" y1="64" x1="0" id="grad-c">
+                <stop stopColor="#FFC800"></stop>
+                <stop stopColor="#F0F" offset="1"></stop>
+                <animateTransform repeatCount="indefinite" keySplines=".42,0,.58,1;.42,0,.58,1;.42,0,.58,1;.42,0,.58,1;.42,0,.58,1;.42,0,.58,1;.42,0,.58,1;.42,0,.58,1" keyTimes="0; 0.125; 0.25; 0.375; 0.5; 0.625; 0.75; 0.875; 1" dur="8s" values="0 32 32;-270 32 32;-270 32 32;-540 32 32;-540 32 32;-810 32 32;-810 32 32;-1080 32 32;-1080 32 32" type="rotate" attributeName="gradientTransform"></animateTransform>
+              </linearGradient>
+
+              {/* grad-d: สีฟ้าไล่ไปเขียว */}
+              <linearGradient gradientUnits="userSpaceOnUse" y2="2" x2="0" y1="62" x1="0" id="grad-d">
+                <stop stopColor="#00E0ED"></stop>
+                <stop stopColor="#00DA72" offset="1"></stop>
+              </linearGradient>
+            </defs>
+
+            {/* เลเยอร์ 1: ตัวอักษรสีทึบเพื่อความอ้วนกลม */}
+            <text 
+              x="2" 
+              y="45" 
+              fontSize="48" 
+              fontWeight="900" 
+              fontFamily="'Arial Rounded MT Bold', 'Comic Sans MS', sans-serif" 
+              fill="url(#grad-c)" /* <-- เปลี่ยนสีทึบตรงนี้ได้ (grad-b, grad-c, หรือ grad-d) */
+            >
+              School
+            </text>
+
+            {/* เลเยอร์ 2: เส้นวิ่งแอนิเมชันสีขาวทับด้านบน */}
+            <text 
+              className="dash" 
+              x="2" 
+              y="45" 
+              fontSize="48" 
+              fontWeight="900" 
+              fontFamily="'Arial Rounded MT Bold', 'Comic Sans MS', sans-serif" 
+              fill="transparent" 
+              stroke="white" /* ใช้เส้นสีขาววิ่งตัดกับสีพื้น */
+              strokeWidth="1.5" 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              pathLength="360"
+            >
+              School
+            </text>
+          </svg>
+          {/* ---------------------------------- */}
+
+          <br />
+          <span className="text-gradient">{name}</span> 
         </h2>
       </div>
 

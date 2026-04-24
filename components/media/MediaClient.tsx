@@ -1,5 +1,6 @@
 ﻿'use client'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { BookOpen, Video, Plus, X, Tag, Play, Search, ChevronRight, FileText, ExternalLink, ArrowLeft, ArrowRight, Pin, PinOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import toast from 'react-hot-toast'
@@ -298,6 +299,7 @@ export default function MediaClient({
 }: {
   knowledge: MediaItem[]; videos: MediaItem[]; isAdmin: boolean
 }) {
+  const router = useRouter()
   const [tab, setTab] = useState<'all' | 'knowledge' | 'video'>('all')
   const [knowledge, setKnowledge] = useState(kInit)
   const [videos, setVideos] = useState(vInit)
@@ -306,6 +308,15 @@ export default function MediaClient({
   const [search, setSearch] = useState('')
   const [featuredIdx, setFeaturedIdx] = useState(0)
   const supabase = createClient()
+
+  // Navigate to detail page (knowledge uses modal, video/pdf/drive go to dedicated page)
+  function openItem(item: MediaItem) {
+    if (item.type === 'knowledge') {
+      setSelected(item)
+    } else {
+      router.push(`/dashboard/media/${item.id}`)
+    }
+  }
 
   // Sort pinned items to top
   const sortedK = [...knowledge].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0))
@@ -346,8 +357,8 @@ export default function MediaClient({
       toast.error(`เพิ่มไม่สำเร็จ: ${error?.message || 'ข้อผิดพลาดที่ไม่รู้จัก'}`)
       return
     }
-    if (data.type === 'knowledge') setKnowledge(p => [...p, { ...form, ...data } as MediaItem])
-    else setVideos(p => [...p, { ...form, ...data } as MediaItem])
+    if (addModal === 'knowledge') setKnowledge(p => [...p, { ...form, type: addModal, id: data.id } as MediaItem])
+    else setVideos(p => [...p, { ...form, type: addModal, id: data.id } as MediaItem])
     toast.success('เพิ่มสำเร็จ ✓')
     setAddModal(null)
   }
@@ -391,7 +402,7 @@ export default function MediaClient({
             const tagStyle = mainTag ? TAG_COLORS[mainTag] : { bg: 'rgba(0,80,203,0.08)', color: '#0050cb' }
             const icon = k.tags?.find(t => TAG_ICONS[t]) ? TAG_ICONS[k.tags.find(t => TAG_ICONS[t])!] : '📄'
             return (
-              <div key={k.id} className="mc-k-card fade-up" onClick={() => setSelected(k)}>
+              <div key={k.id} className="mc-k-card fade-up" onClick={() => openItem(k)}>
                 {k.is_pinned && <div className="mc-pin-badge"><Pin size={9} />ปักหมุด</div>}
                 <div className="mc-k-card-top">
                   <div className="mc-k-icon">{icon}</div>
@@ -466,7 +477,7 @@ export default function MediaClient({
         <>
           {/* Featured video */}
           {featuredVideo && (
-            <div className="mc-featured-video fade-up" onClick={() => setSelected(featuredVideo)}>
+            <div className="mc-featured-video fade-up" onClick={() => openItem(featuredVideo)}>
               <div className="mc-featured-thumb">
                 {getThumb(featuredVideo) && (
                   <img src={getThumb(featuredVideo)!} alt={featuredVideo.title}
@@ -517,7 +528,7 @@ export default function MediaClient({
           {gridVideos.length > 0 && (
             <div className="mc-video-grid">
               {gridVideos.map(v => (
-                <div key={v.id} className="mc-video-card fade-up" onClick={() => setSelected(v)}>
+                <div key={v.id} className="mc-video-card fade-up" onClick={() => openItem(v)}>
                   <div className="mc-video-thumb">
                     {getThumb(v) ? (
                       <img src={getThumb(v)!} alt={v.title} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -686,14 +697,13 @@ export default function MediaClient({
       )}
 
       {/* ── Add Modal ── */}
-      {addModal && createPortal(
+      {addModal && (
         <AddModal
           type={addModal}
           onClose={() => setAddModal(null)}
           onSave={handleAdd}
           supabase={supabase}
-        />,
-        document.body
+        />
       )}
     </div>
   )
@@ -715,10 +725,29 @@ function AddModal({
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // ── เอกสารประกอบแบบลิงก์ ──
+  const [docLinks, setDocLinks] = useState<{ label: string; url: string }[]>([])
+  const [docLabel, setDocLabel] = useState('')
+  const [docUrl, setDocUrl] = useState('')
+
+  function addDocLink() {
+    if (!docUrl.trim()) return
+    setDocLinks(p => [...p, { label: docLabel.trim() || docUrl, url: docUrl.trim() }])
+    setDocLabel(''); setDocUrl('')
+  }
+  function removeDocLink(i: number) {
+    setDocLinks(p => p.filter((_, j) => j !== i))
+  }
+
   async function save() {
     if (!form.title?.trim()) { toast.error('กรุณาใส่ชื่อ'); return }
     setSaving(true)
-    let finalForm = { ...form }
+    let finalForm: Partial<MediaItem> = { ...form }
+
+    // embed doc links into content field as JSON metadata
+    if (docLinks.length > 0) {
+      finalForm = { ...finalForm, doc_links: docLinks } as any
+    }
 
     if (type === 'video' && subType === 'pdf' && pdfFile) {
       setUploading(true)
@@ -754,12 +783,13 @@ function AddModal({
           <h3 style={{ fontWeight: 700 }}>เพิ่ม{type === 'knowledge' ? 'บทความ' : 'สื่อการสอน'}</h3>
           <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
         </div>
-        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
+          {/* ประเภทสื่อ */}
           {type === 'video' && (
             <div>
               <label className="form-label">ประเภทสื่อ</label>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {(['video', 'pdf', 'drive'] as const).map(t => (
                   <button key={t} onClick={() => setSubType(t)} className={`btn btn-sm ${subType === t ? 'btn-primary' : ''}`}>
                     {t === 'video' ? '🎬 วีดีโอ' : t === 'pdf' ? '📕 PDF' : '📁 Drive'}
@@ -769,28 +799,67 @@ function AddModal({
             </div>
           )}
 
-          <div><label className="form-label">ชื่อหัวข้อ *</label><input className="input" value={form.title ?? ''} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
-          <div><label className="form-label">คำอธิบาย</label><input className="input" value={form.description ?? ''} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} /></div>
+          {/* ชื่อ */}
+          <div>
+            <label className="form-label">ชื่อหัวข้อ *</label>
+            <input className="input" value={form.title ?? ''} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} />
+          </div>
 
+          {/* คำอธิบาย — ขยายเป็น textarea */}
+          <div>
+            <label className="form-label">คำอธิบาย</label>
+            <textarea
+              className="input"
+              rows={4}
+              style={{ borderRadius: 'var(--r-lg)', resize: 'vertical', minHeight: 96 }}
+              placeholder="อธิบายรายละเอียดของสื่อนี้..."
+              value={form.description ?? ''}
+              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
+            />
+          </div>
+
+          {/* เนื้อหา (knowledge) */}
           {type === 'knowledge' && (
-            <div><label className="form-label">เนื้อหา</label><textarea className="input" rows={5} style={{ borderRadius: 'var(--r-lg)', resize: 'vertical' }} value={form.content ?? ''} onChange={e => setForm(p => ({ ...p, content: e.target.value }))} /></div>
+            <div>
+              <label className="form-label">เนื้อหา</label>
+              <textarea
+                className="input"
+                rows={7}
+                style={{ borderRadius: 'var(--r-lg)', resize: 'vertical', minHeight: 160 }}
+                placeholder="เนื้อหาบทความ..."
+                value={form.content ?? ''}
+                onChange={e => setForm(p => ({ ...p, content: e.target.value }))}
+              />
+            </div>
           )}
+
+          {/* URL วีดีโอ (ไม่แสดงลิงก์ URL แยก) */}
           {type === 'video' && subType === 'video' && (
             <>
-              <div><label className="form-label">URL วีดีโอ (YouTube)</label><input className="input" placeholder="https://www.youtube.com/watch?v=..." value={form.video_url ?? ''} onChange={e => setForm(p => ({ ...p, video_url: e.target.value }))} /></div>
-              <div><label className="form-label">ความยาว</label><input className="input" placeholder="12:34" value={form.duration ?? ''} onChange={e => setForm(p => ({ ...p, duration: e.target.value }))} /></div>
+              <div>
+                <label className="form-label">URL วีดีโอ (YouTube)</label>
+                <input className="input" placeholder="https://www.youtube.com/watch?v=..." value={form.video_url ?? ''} onChange={e => setForm(p => ({ ...p, video_url: e.target.value }))} />
+              </div>
+              <div>
+                <label className="form-label">ความยาว</label>
+                <input className="input" placeholder="12:34" value={form.duration ?? ''} onChange={e => setForm(p => ({ ...p, duration: e.target.value }))} />
+              </div>
             </>
           )}
+
+          {/* PDF upload */}
           {type === 'video' && subType === 'pdf' && (
             <div>
               <label className="form-label">ไฟล์ PDF</label>
-              <label style={{ display:'flex', alignItems:'center', gap:8, border:'1.5px dashed var(--outline-variant)', borderRadius:'var(--r-md)', padding:12, cursor:'pointer', background: pdfFile ? 'var(--error-container)' : '' }}>
-                <FileText size={16} color={pdfFile ? 'var(--error)' : 'var(--outline)'} />
-                <span style={{ fontSize:13, color: pdfFile ? 'var(--error)' : 'var(--outline)' }}>{pdfFile?.name ?? 'คลิกเลือกไฟล์ PDF...'}</span>
+              <label style={{ display:'flex', alignItems:'center', gap:8, border:'1.5px dashed var(--outline-variant)', borderRadius:'var(--r-md)', padding:12, cursor:'pointer', background: pdfFile ? 'rgba(5,150,105,0.05)' : '' }}>
+                <FileText size={16} color={pdfFile ? '#059669' : 'var(--outline)'} />
+                <span style={{ fontSize:13, color: pdfFile ? '#059669' : 'var(--outline)' }}>{pdfFile?.name ?? 'คลิกเลือกไฟล์ PDF...'}</span>
                 <input type="file" accept=".pdf" style={{ display:'none' }} onChange={e => setPdfFile(e.target.files?.[0] ?? null)} />
               </label>
             </div>
           )}
+
+          {/* Drive link */}
           {type === 'video' && subType === 'drive' && (
             <div>
               <label className="form-label">ลิงก์ Google Drive</label>
@@ -799,6 +868,57 @@ function AddModal({
             </div>
           )}
 
+          {/* ── เอกสารประกอบ (ลิงก์) ── */}
+          <div>
+            <label className="form-label" style={{ display:'flex', alignItems:'center', gap:6 }}>
+              <ExternalLink size={13} /> เอกสารประกอบ (ลิงก์)
+            </label>
+            <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                placeholder="ชื่อเอกสาร เช่น Summary.pdf"
+                value={docLabel}
+                onChange={e => setDocLabel(e.target.value)}
+              />
+              <input
+                className="input"
+                style={{ flex: 2 }}
+                placeholder="URL ลิงก์..."
+                value={docUrl}
+                onChange={e => setDocUrl(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addDocLink() } }}
+              />
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={addDocLink}
+                disabled={!docUrl.trim()}
+                style={{ flexShrink: 0 }}
+              >
+                + เพิ่ม
+              </button>
+            </div>
+            {/* รายการที่เพิ่มแล้ว */}
+            {docLinks.length > 0 && (
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                {docLinks.map((d, i) => (
+                  <div key={i} style={{ display:'flex', alignItems:'center', gap:8, background:'var(--surface-low)', borderRadius:'var(--r-md)', padding:'8px 12px' }}>
+                    <ExternalLink size={13} color="var(--primary)" style={{ flexShrink:0 }} />
+                    <span style={{ flex:1, fontSize:13, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{d.label}</span>
+                    <span style={{ fontSize:11, color:'var(--outline)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:160 }}>{d.url}</span>
+                    <button onClick={() => removeDocLink(i)} style={{ background:'none', border:'none', cursor:'pointer', color:'var(--error)', padding:2, flexShrink:0 }}>
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {docLinks.length === 0 && (
+              <p style={{ fontSize:11, color:'var(--outline)', marginTop:2 }}>💡 ใส่ลิงก์เอกสารเพิ่มเติม เช่น PDF, Slides, Worksheet</p>
+            )}
+          </div>
+
+          {/* แท็ก */}
           <div>
             <label className="form-label">แท็ก</label>
             <input className="input" value={tagInput} placeholder="พิมพ์แล้วกด Enter"

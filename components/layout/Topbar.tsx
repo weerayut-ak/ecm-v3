@@ -1,9 +1,10 @@
 'use client'
-import { usePathname } from 'next/navigation'
 import Link from 'next/link'
 import { Bell, Settings, Menu } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import AppLogo from '@/components/ui/AppLogo'
+
 
 interface Profile { full_name: string; nickname?: string | null; role: string }
 
@@ -40,24 +41,33 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
       padding: '0 16px', flexShrink: 0, position: 'sticky', top: 0, zIndex: 30,
     }}>
       <style>{`
-        .tb-title { font-size: 17px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+        /* ปุ่มเมนู 3 ขีด: ซ่อนบนมือถือ (มี MobileNav แทนอยู่แล้ว), แสดงบน desktop */
+        .tb-hamburger { display: none; }
+        /* กระดิ่ง + ตั้งค่า: ซ่อนบนมือถือจอเล็กมาก */
         .tb-bell, .tb-settings { display: flex; }
+        /* ภาคเรียน: ซ่อนบนมือถือ */
+        .tb-semester { display: none; }
+
+        @media (min-width: 769px) {
+          .tb-hamburger { display: flex; }
+          .tb-semester  { display: inline; }
+        }
         @media (max-width: 480px) {
           .tb-bell, .tb-settings { display: none; }
-          .tb-title { max-width: 140px; font-size: 15px; }
         }
       `}</style>
+
+      {/* ── ฝั่งซ้าย: hamburger + โลโก้ ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-        {/* Hamburger button */}
-        {/* Hamburger button */}
+
+        {/* ปุ่ม 3 ขีด — แสดงเฉพาะ desktop (sidebar toggle) */}
         <button
+          className="tb-hamburger"
           onClick={onMenuClick}
           title="เปิด/ปิดเมนู"
-          className="hidden sm:flex" // 1. เพิ่ม className ตรงนี้ (ซ่อนในมือถือ, แสดงเป็น flex ในจอใหญ่)
           style={{
             width: 38, height: 38, borderRadius: 10, border: 'none', flexShrink: 0,
             background: 'transparent', cursor: 'pointer',
-            // display: 'flex',      // 2. ลบบรรทัดนี้ออก หรือคอมเมนต์ไว้
             alignItems: 'center', justifyContent: 'center',
             color: 'var(--outline)', transition: 'background 0.2s, color 0.2s',
           }}
@@ -67,13 +77,19 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
           <Menu size={20} />
         </button>
 
-        <span className="tb-title" style={{ fontWeight: 900, color: '#0050cb', letterSpacing: '-0.03em' }}>
-          English Class
-        </span>
+        {/*
+          ── โลโก้แอพ ──
+          แก้ชื่อ / รูปได้ที่ไฟล์:  components/ui/AppLogo.tsx
+          วางไฟล์รูปไว้ที่:          public/logo.png
+        */}
+        <AppLogo showName size={30} style={{ minWidth: 0 }} />
+
       </div>
 
+      {/* ── ฝั่งขวา: ภาคเรียน + ไอคอน + avatar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-        {/* Semester display / edit */}
+
+        {/* ภาคเรียน (desktop เท่านั้น) */}
         {editing && isAdmin ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 12, color: 'var(--outline)', fontWeight: 600 }}>ภาคเรียน</span>
@@ -89,52 +105,63 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
                 fontFamily: 'inherit', outline: 'none',
               }}
             />
-            <button onClick={saveSemester} style={{ fontSize: 11, background: '#0050cb', color: 'white', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700 }}>บันทึก</button>
-            <button onClick={() => setEditing(false)} style={{ fontSize: 11, background: 'rgba(0,0,0,0.06)', color: 'var(--text-2)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>ยกเลิก</button>
+            <button onClick={saveSemester} style={{ fontSize: 11, background: '#0050cb', color: 'white', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontWeight: 700 }}>
+              บันทึก
+            </button>
+            <button onClick={() => setEditing(false)} style={{ fontSize: 11, background: 'rgba(0,0,0,0.06)', color: 'var(--text-2)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>
+              ยกเลิก
+            </button>
           </div>
         ) : (
           <span
+            className="tb-semester"
             onClick={() => isAdmin && setEditing(true)}
-            className="hidden sm:block"
             title={isAdmin ? 'คลิกเพื่อแก้ไขภาคเรียน' : undefined}
             style={{
               fontSize: 12, color: 'var(--outline)', fontWeight: 600,
               cursor: isAdmin ? 'pointer' : 'default',
               padding: '4px 8px', borderRadius: 8,
-              transition: 'background 0.15s',
-              userSelect: 'none',
+              transition: 'background 0.15s', userSelect: 'none',
             }}
             onMouseEnter={e => isAdmin && (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
             onMouseLeave={e => isAdmin && (e.currentTarget.style.background = 'transparent')}
           >
-            ภาคเรียน {semester}{isAdmin && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.5 }}>✏️</span>}
+            ภาคเรียน {semester}
+            {isAdmin && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.5 }}>✏️</span>}
           </span>
         )}
 
-        <button className="tb-bell" style={{
-          width: 38, height: 38, borderRadius: '50%', border: 'none',
-          background: 'transparent', cursor: 'pointer',
-          alignItems: 'center', justifyContent: 'center',
-          color: 'var(--outline)', transition: 'background 0.2s',
-        }}
+        {/* กระดิ่ง */}
+        <button
+          className="tb-bell"
+          style={{
+            width: 38, height: 38, borderRadius: '50%', border: 'none',
+            background: 'transparent', cursor: 'pointer',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'var(--outline)', transition: 'background 0.2s',
+          }}
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
           <Bell size={18} />
         </button>
 
-        <button className="tb-settings" style={{
-          width: 38, height: 38, borderRadius: '50%', border: 'none',
-          background: 'transparent', cursor: 'pointer',
-          alignItems: 'center', justifyContent: 'center',
-          color: 'var(--outline)', transition: 'background 0.2s',
-        }}
+        {/* ตั้งค่า */}
+        <button
+          className="tb-settings"
+          style={{
+            width: 38, height: 38, borderRadius: '50%', border: 'none',
+            background: 'transparent', cursor: 'pointer',
+            alignItems: 'center', justifyContent: 'center',
+            color: 'var(--outline)', transition: 'background 0.2s',
+          }}
           onMouseEnter={e => (e.currentTarget.style.background = 'rgba(0,80,203,0.07)')}
           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
         >
           <Settings size={18} />
         </button>
 
+        {/* Avatar → ไปหน้า Profile */}
         <Link href="/dashboard/profile" style={{ textDecoration: 'none' }}>
           <div style={{
             width: 38, height: 38, borderRadius: '50%',
@@ -147,6 +174,7 @@ export default function Topbar({ profile, onMenuClick }: { profile: Profile | nu
             {initial}
           </div>
         </Link>
+
       </div>
     </header>
   )

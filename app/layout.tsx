@@ -1,11 +1,22 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Toaster } from 'react-hot-toast'
+<html lang="th" suppressHydrationWarning data-scroll-behavior="smooth"></html>
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+}
 
 export const metadata: Metadata = {
   title: 'English Class Manager',
   description: 'ระบบจัดการนักเรียนวิชาภาษาอังกฤษ ม.1–3',
-  viewport: 'width=device-width, initial-scale=1, maximum-scale=1',
+  // เพิ่มส่วน icons
+  icons: {
+    icon: '/logo.png', // เปลี่ยนเป็นชื่อไฟล์รูปที่คุณมีในโฟลเดอร์ public ได้เลย เช่น '/favicon.ico'
+    apple: '/logo.png', // (ตัวเลือกเสริม) สำหรับไอคอนเวลาเซฟลงหน้าจอมือถือ Apple
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

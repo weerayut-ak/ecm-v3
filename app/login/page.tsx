@@ -56,18 +56,17 @@ export default function LoginPage() {
           pointerEvents: 'none',
         }} />
 
-        {/* Logo */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, position: 'relative' }}>
-          <div style={{
-            width: 48, height: 48, borderRadius: 16,
-            background: 'linear-gradient(135deg, #0050cb 0%, #0066ff 100%)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 10px 25px rgba(0,80,203,0.3)',
-          }}>
-            <BookOpen size={22} color="white" />
-          </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* โลโก้ของคุณ (แทนที่ URL ตรง src ให้เป็นรูปโลโก้วงกลมของคุณ) */}
+          <img 
+            src="/logo.png" 
+            alt="Logo" 
+            style={{ width: '150px', height: '150px', objectFit: 'contain' }} 
+          />
+
+          {/* ส่วนของข้อความ */}
           <div>
-            <div style={{ fontWeight: 900, fontSize: 20, color: '#0050cb', letterSpacing: '-0.03em' }}>The Scholar</div>
+            <div style={{ fontWeight: 900, fontSize: 20, color: '#111827', letterSpacing: '-0.03em' }}>The Scholar</div>
             <div style={{ fontSize: 11, color: 'var(--outline)', fontWeight: 600 }}>V3 Desktop</div>
           </div>
         </div>
@@ -115,16 +114,23 @@ export default function LoginPage() {
         <div style={{ width: '100%', maxWidth: 400 }} className="fade-up">
 
           {/* Mobile logo */}
-          <div className="flex items-center gap-3 mb-8 lg:hidden">
-            <div style={{ width: 40, height: 40, borderRadius: 12, background: 'linear-gradient(135deg,#0050cb,#0066ff)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(0,80,203,0.3)' }}>
-              <BookOpen size={18} color="white" />
-            </div>
-            <span style={{ fontWeight: 900, fontSize: 18, color: '#0050cb', letterSpacing: '-0.02em' }}>The Scholar</span>
+          <div className="flex flex-col items-center justify-center gap-2 mb-8 lg:hidden">
+            
+            <img 
+              src="/logo.png" 
+              alt="The Scholar Logo" 
+              style={{ width: '200px', height: '200px', objectFit: 'contain' }} 
+            />
+            
+            <span style={{ fontWeight: 900, fontSize: 18, color: '#111827', letterSpacing: '-0.02em', textAlign: 'center' }}>
+              The Scholar
+            </span>
+            
           </div>
 
           <div style={{ marginBottom: 32 }}>
             <p style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--primary)', marginBottom: 8 }}>Student Dashboard</p>
-            <h1 style={{ fontSize: 32, fontWeight: 900, marginBottom: 6, letterSpacing: '-0.03em', color: 'var(--on-surface)' }}>ยินดีต้อนรับ 👋</h1>
+            <h1 style={{ fontSize: 32, fontWeight: 900, marginBottom: 6, letterSpacing: '-0.03em', color: 'var(--on-surface)' }}>ยินดีต้อนรับ </h1>
             <p style={{ color: 'var(--on-surface-variant)', fontSize: 14, fontWeight: 500 }}>กรุณาเข้าสู่ระบบเพื่อเริ่มใช้งาน</p>
           </div>
 

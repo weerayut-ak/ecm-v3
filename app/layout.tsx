@@ -12,9 +12,10 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   title: 'English Class Manager',
   description: 'ระบบจัดการนักเรียนวิชาภาษาอังกฤษ ม.1–3',
+  manifest: '/manifest.json',   
   // เพิ่มส่วน icons
   icons: {
-    icon: '/logo.png', // เปลี่ยนเป็นชื่อไฟล์รูปที่คุณมีในโฟลเดอร์ public ได้เลย เช่น '/favicon.ico'
+    icon: '/logo.png', // เปลี่ยนเป็นชื่อไฟล์รูปที่คุณมีในโฟลเดอร์ public 
     apple: '/logo.png', // (ตัวเลือกเสริม) สำหรับไอคอนเวลาเซฟลงหน้าจอมือถือ Apple
   },
 }
@@ -22,6 +23,13 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="th" suppressHydrationWarning>
+
+        <head>
+          <meta name="theme-color" content="#0050cb" />
+          <meta name="apple-mobile-web-app-capable" content="yes" />
+          <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        </head>
+
       <body suppressHydrationWarning>
         {children}
         <Toaster

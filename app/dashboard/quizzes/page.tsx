@@ -24,13 +24,15 @@ export default async function QuizzesPage() {
   ])
 
   const submissionMap = new Map(mySubmissions?.map(s => [s.quiz_id, s]) ?? [])
-  const sessionMap = new Map(mySessions?.map(s => [s.quiz_id, s]) ?? [])
+  const sessionMap    = new Map(mySessions?.map(s => [s.quiz_id, s]) ?? [])
 
   return (
     <div>
       <div style={{ marginBottom: 20 }}>
         <h1 style={{ fontSize: 18, fontWeight: 700 }}>แบบทดสอบ</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>{quizzes?.filter(q => q.is_open).length ?? 0} ชุดที่เปิดอยู่</p>
+        <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
+          {quizzes?.filter(q => q.is_open).length ?? 0} ชุดที่เปิดอยู่
+        </p>
       </div>
 
       {quizzes?.length === 0 && (
@@ -43,10 +45,12 @@ export default async function QuizzesPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
         {quizzes?.map(q => {
           const submission = submissionMap.get(q.id)
-          const session = sessionMap.get(q.id)
-          const qCount = (q.questions as { count: number }[])?.[0]?.count ?? 0
-          const isBlocked = session?.status === 'blocked' || (session?.leave_count ?? 0) >= 3
+          const session    = sessionMap.get(q.id)
+          const qCount     = (q.questions as { count: number }[])?.[0]?.count ?? 0
           const leaveCount = session?.leave_count ?? 0
+
+          // ✅ เช็ค blocked จาก status หรือ leave_count >= 3 เหมือนกันทุกที่
+          const isBlocked  = session?.status === 'blocked' || leaveCount >= 3
 
           return (
             <div key={q.id} className="card" style={{
@@ -62,7 +66,9 @@ export default async function QuizzesPage() {
               </div>
 
               {q.description && (
-                <p style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 10, lineHeight: 1.5 }}>{q.description}</p>
+                <p style={{ fontSize: 12, color: 'var(--text-2)', marginBottom: 10, lineHeight: 1.5 }}>
+                  {q.description}
+                </p>
               )}
 
               {/* Info */}
@@ -81,20 +87,20 @@ export default async function QuizzesPage() {
                 )}
                 {q.opens_at && (
                   <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                    📅 {new Date(q.opens_at).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' })}
+                    📅 {new Date(q.opens_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
                     {' – '}
-                    {new Date(q.closes_at!).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit' })}
+                    {new Date(q.closes_at!).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
                   </div>
                 )}
               </div>
 
-              {/* Leave warning indicator */}
+              {/* Leave warning */}
               {leaveCount > 0 && !submission && (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px',
                   borderRadius: 8, marginBottom: 10, fontSize: 12, fontWeight: 600,
                   background: isBlocked ? 'var(--red-light)' : 'var(--amber-light)',
-                  color: isBlocked ? 'var(--red)' : 'var(--amber)',
+                  color:      isBlocked ? 'var(--red)'       : 'var(--amber)',
                 }}>
                   <AlertTriangle size={12} />
                   {isBlocked ? 'ถูกล็อค — รอแอดมินอนุญาต' : `ออกไปแล้ว ${leaveCount}/3 ครั้ง`}
@@ -109,27 +115,35 @@ export default async function QuizzesPage() {
                       display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
                       borderRadius: 10, fontSize: 13,
                       background: submission.is_passed ? 'var(--green-light)' : 'var(--red-light)',
-                      color: submission.is_passed ? 'var(--green)' : 'var(--red)',
+                      color:      submission.is_passed ? 'var(--green)'       : 'var(--red)',
                     }}>
                       {submission.is_passed ? <CheckCircle size={15} /> : <XCircle size={15} />}
                       <span style={{ fontWeight: 700 }}>
                         {submission.score?.toFixed(0)}% · {submission.is_passed ? 'ผ่าน ✓' : 'ไม่ผ่าน'}
                       </span>
                     </div>
-                    <Link href={`/dashboard/quizzes/${q.id}/result`} className="btn btn-sm" style={{ justifyContent: 'center', fontSize: 12 }}>
+                    <Link href={`/dashboard/quizzes/${q.id}/result`} className="btn btn-sm"
+                      style={{ justifyContent: 'center', fontSize: 12 }}>
                       ดูผลคะแนน
                     </Link>
                   </div>
                 ) : isBlocked ? (
-                  <button className="btn" disabled style={{ width: '100%', justifyContent: 'center', opacity: 0.7 }}>
+                  // ✅ ใช้ <button disabled> ไม่ใช่ <Link> — กันนักเรียนคลิกผ่านได้เด็ดขาด
+                  <button className="btn" disabled style={{ width: '100%', justifyContent: 'center', opacity: 0.6, cursor: 'not-allowed' }}>
                     <Lock size={13} /> ถูกล็อค
                   </button>
                 ) : q.is_open ? (
-                  <Link href={`/dashboard/quizzes/${q.id}/terms`} className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', display: 'flex', textDecoration: 'none' }}>
+                  <Link
+                    href={`/dashboard/quizzes/${q.id}/terms`}
+                    className="btn btn-primary"
+                    style={{ width: '100%', justifyContent: 'center', display: 'flex', textDecoration: 'none' }}
+                  >
                     {leaveCount > 0 ? '▶ ทำต่อ' : '▶ เริ่มทำแบบทดสอบ'}
                   </Link>
                 ) : (
-                  <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>ยังไม่เปิด</button>
+                  <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
+                    ยังไม่เปิด
+                  </button>
                 )}
               </div>
             </div>

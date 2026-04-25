@@ -1,542 +1,711 @@
-"use client"
-import { useState, useEffect } from "react"
-import { createPortal } from "react-dom"
-import { createClient } from "@/lib/supabase/client"
-import { Plus, X, Clock, ToggleLeft, ToggleRight, Edit2, Trash2, Users, AlertTriangle, RefreshCw, ChevronDown, ChevronUp } from "lucide-react"
-import toast from "react-hot-toast"
-import type { Quiz, Question, QuizOption } from "@/types/quiz"
+'use client'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import { createClient } from '@/lib/supabase/client'
+import { useTimer } from '@/hooks/useTimer'
+import { useLeaveGuard } from '@/hooks/useLeaveGuard'
+import type { Quiz, Question } from '@/types/quiz'
+import { AlertTriangle, Clock, ArrowLeft, ArrowRight, Send, LogOut, CheckCircle2, Save } from 'lucide-react'
+import toast from 'react-hot-toast'
 
-interface QuizRow extends Omit<Quiz, 'questions'> { questions: { count: number }[] }
+const MAX_LEAVES      = 3
+const PENALTY_SECONDS = 60
 
-interface Session {
-  id: string
-  student_id: string
-  quiz_id: string
-  leave_count: number
-  status: string
-  last_seen: string
-  reset_at: string | null
-  student: { full_name: string; nickname: string | null; grade: string | null; student_id: string | null } | null
-}
+// ── Auto-save strategy ───────────────────────────────────────────────────────
+// MCQ  → บันทึกทันทีเมื่อกดเลือก
+// Fill → debounce 30s
+// Essay→ debounce 90s
+// Nav  → flush pending debounce แล้ว save ทันที
+const FILL_DEBOUNCE_MS  = 30_000
+const ESSAY_DEBOUNCE_MS = 90_000
 
-export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow[] }) {
-  const [quizzes, setQuizzes] = useState(init)
-  const [modal, setModal] = useState<{ mode: "add" | "edit"; quiz?: QuizRow } | null>(null)
-  const [qModal, setQModal] = useState<{ quizId: string; quizTitle: string } | null>(null)
-  const [violationsModal, setViolationsModal] = useState<{ quizId: string; quizTitle: string } | null>(null)
+const OPT_COLORS = [
+  { bg: 'rgba(37,99,235,0.08)',  border: '#2563eb', labelBg: '#2563eb', text: '#1d4ed8' },
+  { bg: 'rgba(124,58,237,0.08)', border: '#7c3aed', labelBg: '#7c3aed', text: '#6d28d9' },
+  { bg: 'rgba(5,150,105,0.08)',  border: '#059669', labelBg: '#059669', text: '#047857' },
+  { bg: 'rgba(217,119,6,0.08)',  border: '#d97706', labelBg: '#d97706', text: '#b45309' },
+  { bg: 'rgba(220,38,38,0.08)',  border: '#dc2626', labelBg: '#dc2626', text: '#b91c1c' },
+]
+const LABELS = ['A', 'B', 'C', 'D', 'E']
+
+export default function QuizAttemptClient({
+  quiz, questions, userId,
+}: {
+  quiz: Quiz
+  questions: Question[]
+  userId: string
+}) {
+  const router   = useRouter()
   const supabase = createClient()
 
-  async function toggleOpen(quiz: QuizRow) {
-    await supabase.from("quizzes").update({ is_open: !quiz.is_open }).eq("id", quiz.id)
-    setQuizzes(p => p.map(q => q.id === quiz.id ? { ...q, is_open: !quiz.is_open } : q))
-    toast.success(quiz.is_open ? "ปิดแล้ว" : "เปิดแล้ว")
+  const [sessionReady, setSessionReady] = useState(false)
+  const [answers,      setAnswers]      = useState<Record<string, string | number>>({})
+  const [currentIndex, setCurrentIndex] = useState(0)
+  const [submitting,   setSubmitting]   = useState(false)
+  // ✅ warnings เก็บ leave_count จริงจาก DB เป็น source of truth
+  const [warnings,     setWarnings]     = useState(0)
+  const [blocked,      setBlocked]      = useState(false)
+  const [saveStatus,   setSaveStatus]   = useState<'idle' | 'saving' | 'saved'>('idle')
+
+  const startRef       = useRef(Date.now())
+  const answersRef     = useRef<Record<string, string | number>>({})
+  const debounceTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const essayInterval  = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  useEffect(() => { answersRef.current = answers }, [answers])
+
+  // ── โหลด session จาก DB ─────────────────────────────────────────
+  useEffect(() => {
+    const initSession = async () => {
+      const { data } = await supabase
+        .from('quiz_sessions')
+        .select('leave_count, status, draft_answers')
+        .eq('student_id', userId)
+        .eq('quiz_id', quiz.id)
+        .maybeSingle()
+
+      if (data) {
+        if (data.draft_answers && typeof data.draft_answers === 'object') {
+          const draft = data.draft_answers as Record<string, string | number>
+          setAnswers(draft)
+          answersRef.current = draft
+        }
+        const currentCount = data.leave_count ?? 0
+        setWarnings(currentCount)
+
+        // ✅ ล็อคทันทีถ้า DB บอกว่า blocked หรือ count ถึงขีด
+        if (data.status === 'blocked' || currentCount >= MAX_LEAVES) {
+          setBlocked(true)
+        }
+      } else {
+        await supabase.from('quiz_sessions').insert({
+          student_id: userId,
+          quiz_id:    quiz.id,
+          status:     'active',
+          leave_count: 0,
+          last_seen:  new Date().toISOString(),
+        })
+      }
+      setSessionReady(true)
+    }
+    initSession()
+  }, [userId, quiz.id])
+
+  // ── saveDraft ────────────────────────────────────────────────────
+  const saveDraft = useCallback(async (latestAnswers: Record<string, string | number>) => {
+    setSaveStatus('saving')
+    await supabase
+      .from('quiz_sessions')
+      .update({ draft_answers: latestAnswers, last_saved_at: new Date().toISOString() })
+      .eq('student_id', userId)
+      .eq('quiz_id', quiz.id)
+    setSaveStatus('saved')
+    setTimeout(() => setSaveStatus('idle'), 2000)
+  }, [userId, quiz.id])
+
+  // ── MCQ ─────────────────────────────────────────────────────────
+  function handleMCQAnswer(questionId: string, optionIndex: number) {
+    const next = { ...answersRef.current, [questionId]: optionIndex }
+    setAnswers(next)
+    answersRef.current = next
+    saveDraft(next)
   }
 
-  async function deleteQuiz(id: string) {
-    if (!confirm("ยืนยันการลบ?")) return
-    await supabase.from("quizzes").delete().eq("id", id)
-    setQuizzes(p => p.filter(q => q.id !== id))
-    toast.success("ลบแล้ว")
+  // ── Fill / Essay ─────────────────────────────────────────────────
+  function handleTextAnswer(questionId: string, value: string, type: 'fill' | 'essay') {
+    const next = { ...answersRef.current, [questionId]: value }
+    setAnswers(next)
+    answersRef.current = next
+
+    if (debounceTimers.current[questionId]) clearTimeout(debounceTimers.current[questionId])
+    const delay = type === 'essay' ? ESSAY_DEBOUNCE_MS : FILL_DEBOUNCE_MS
+    debounceTimers.current[questionId] = setTimeout(() => saveDraft(answersRef.current), delay)
   }
 
-  async function onSaved(quiz: QuizRow) {
-    if (modal?.mode === "add") setQuizzes(p => [quiz, ...p])
-    else setQuizzes(p => p.map(q => q.id === quiz.id ? quiz : q))
-    setModal(null)
-    toast.success("บันทึกแล้ว ✓")
+  // ── Navigation ───────────────────────────────────────────────────
+  function navigate(newIndex: number) {
+    Object.values(debounceTimers.current).forEach(t => clearTimeout(t))
+    debounceTimers.current = {}
+    saveDraft(answersRef.current)
+    setCurrentIndex(newIndex)
   }
-
-  return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
-        <div>
-          <h1 style={{ fontSize: 17, fontWeight: 700 }}>จัดการแบบทดสอบ</h1>
-          <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>{quizzes.length} ชุด</p>
-        </div>
-        <button className="btn btn-primary" onClick={() => setModal({ mode: "add" })}>
-          <Plus size={14} /> สร้างแบบทดสอบ
-        </button>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {quizzes.map(q => (
-          <div key={q.id} className="card">
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                  <h3 style={{ fontWeight: 700, fontSize: 15 }}>{q.title}</h3>
-                  <span className={`badge ${q.is_open ? "badge-green" : "badge-red"}`}>{q.is_open ? "เปิด" : "ปิด"}</span>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, fontSize: 12, color: "var(--text-2)" }}>
-                  <span>📝 {q.questions?.[0]?.count ?? 0} ข้อ</span>
-                  <span>🎯 ผ่าน {q.pass_score}%</span>
-                  {q.time_limit && <span style={{ display: "flex", alignItems: "center", gap: 3 }}><Clock size={11} /> {q.time_limit} นาที</span>}
-                  {q.opens_at && <span>📅 {new Date(q.opens_at).toLocaleDateString("th-TH")} – {new Date(q.closes_at!).toLocaleDateString("th-TH")}</span>}
-                </div>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, flexShrink: 0 }}>
-                <button className="btn btn-sm" onClick={() => toggleOpen(q)} style={{ color: q.is_open ? "var(--green)" : "var(--text-3)" }}>
-                  {q.is_open ? <ToggleRight size={14} /> : <ToggleLeft size={14} />}
-                  {q.is_open ? "ปิด" : "เปิด"}
-                </button>
-                <button className="btn btn-sm" onClick={() => setQModal({ quizId: q.id, quizTitle: q.title })}>
-                  <Edit2 size={12} /> ข้อสอบ
-                </button>
-                <button className="btn btn-sm" onClick={() => setViolationsModal({ quizId: q.id, quizTitle: q.title })} style={{ color: 'var(--amber)' }}>
-                  <AlertTriangle size={12} /> ออกกลางคัน
-                </button>
-                <button className="btn btn-sm" onClick={() => setModal({ mode: "edit", quiz: q })}>แก้ไข</button>
-                <button className="btn btn-sm btn-danger" onClick={() => deleteQuiz(q.id)}><Trash2 size={12} /></button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {modal && <QuizFormModal mode={modal.mode} quiz={modal.quiz} onClose={() => setModal(null)} onSaved={onSaved} />}
-      {qModal && <QuestionManagerModal quizId={qModal.quizId} quizTitle={qModal.quizTitle} onClose={() => setQModal(null)} />}
-      {violationsModal && <ViolationsModal quizId={violationsModal.quizId} quizTitle={violationsModal.quizTitle} onClose={() => setViolationsModal(null)} />}
-    </div>
-  )
-}
-
-// =============================================
-// VIOLATIONS MODAL
-// =============================================
-function ViolationsModal({ quizId, quizTitle, onClose }: { quizId: string; quizTitle: string; onClose: () => void }) {
-  const [sessions, setSessions] = useState<Session[]>([])
-  const [loading, setLoading] = useState(true)
-  const [resetting, setResetting] = useState<string | null>(null)
-  const supabase = createClient()
 
   useEffect(() => {
-    load()
+    return () => {
+      Object.values(debounceTimers.current).forEach(t => clearTimeout(t))
+      if (essayInterval.current) clearInterval(essayInterval.current)
+    }
   }, [])
 
-  async function load() {
-    setLoading(true)
-    const { data } = await supabase
+  // ── Timer ────────────────────────────────────────────────────────
+  const handleExpire = useCallback(() => {
+    toast.error('⏰ หมดเวลาแล้ว! กำลังส่งอัตโนมัติ...', { duration: 4000 })
+    doSubmit()
+  }, [])
+
+  const timer = useTimer({
+    initialSeconds: quiz.time_limit ? quiz.time_limit * 60 : 0,
+    onExpire: handleExpire,
+    autoStart: !!quiz.time_limit,
+  })
+
+  // ── Leave guard ──────────────────────────────────────────────────
+  // ✅ ไม่ใส่ !blocked ใน enabled เพราะถ้า blocked แล้ว sessionReady
+  //    จะแสดง blocked screen และ hook จะไม่ทำงานต่อ (component unmount)
+  useLeaveGuard({
+    enabled:      sessionReady && !submitting,
+    quizId:       quiz.id,
+    userId,
+    initialCount: warnings,   // ส่งค่าจาก DB ให้ hook ใช้เป็นจุดเริ่มต้น
+    onLeave: (count) => {
+      // ✅ อัปเดต warnings state จาก count ที่ hook คำนวณและบันทึก DB เสร็จแล้ว
+      setWarnings(count)
+      if (count >= MAX_LEAVES) {
+        setBlocked(true)
+        toast.error('🚫 ถูกล็อคเนื่องจากออกจากหน้าสอบเกินกำหนด', { duration: 0 })
+      } else {
+        toast.error(`⚠️ ออกจากหน้าสอบ! (ครั้งที่ ${count}/${MAX_LEAVES})`)
+        if (quiz.time_limit) timer.deduct(PENALTY_SECONDS)
+      }
+    },
+  })
+
+  // ── Submit ───────────────────────────────────────────────────────
+  async function doSubmit() {
+    if (submitting) return
+    Object.values(debounceTimers.current).forEach(t => clearTimeout(t))
+    debounceTimers.current = {}
+
+    setSubmitting(true)
+    timer.stop()
+
+    let correct = 0, scoreable = 0
+    questions.forEach(q => {
+      if (q.type === 'mcq') {
+        scoreable++
+        if (String(answersRef.current[q.id]) === String(q.correct_answer)) correct++
+      } else if (q.type === 'fill') {
+        scoreable++
+        if (
+          String(answersRef.current[q.id] ?? '').trim().toLowerCase() ===
+          (q.correct_answer ?? '').trim().toLowerCase()
+        ) correct++
+      }
+    })
+
+    const score      = scoreable > 0 ? (correct / scoreable) * 100 : null
+    const is_passed  = score !== null ? score >= quiz.pass_score : null
+    const time_taken = Math.floor((Date.now() - startRef.current) / 1000)
+
+    await supabase
       .from('quiz_sessions')
-      .select('*, student:profiles(full_name, nickname, grade, student_id)')
-      .eq('quiz_id', quizId)
-      .gt('leave_count', 0)
-      .order('leave_count', { ascending: false })
-    setSessions((data as Session[]) ?? [])
-    setLoading(false)
-  }
+      .update({ status: 'submitted', draft_answers: null })
+      .eq('student_id', userId)
+      .eq('quiz_id', quiz.id)
 
-  async function resetStudent(session: Session) {
-    if (!confirm(`อนุญาตให้ ${session.student?.nickname ?? session.student?.full_name} ทำแบบทดสอบอีกครั้ง?`)) return
-    setResetting(session.id)
-    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('submissions').upsert(
+      {
+        quiz_id:      quiz.id,
+        student_id:   userId,
+        answers:      answersRef.current,
+        score,
+        is_passed,
+        time_taken,
+        submitted_at: new Date().toISOString(),
+      },
+      { onConflict: 'quiz_id,student_id' }
+    )
 
-    // Reset session
-    const { error: se } = await supabase.from('quiz_sessions').update({
-      leave_count: 0,
-      status: 'active',
-      reset_by: user?.id,
-      reset_at: new Date().toISOString(),
-    }).eq('id', session.id)
-
-    // Delete submission so they can retry
-    const { error: de } = await supabase.from('submissions')
-      .delete()
-      .eq('quiz_id', quizId)
-      .eq('student_id', session.student_id)
-
-    if (se || de) {
-      toast.error('รีเซ็ตไม่สำเร็จ')
-    } else {
-      toast.success(`อนุญาตให้ ${session.student?.nickname ?? session.student?.full_name} ทำซ้ำแล้ว ✓`)
-      setSessions(p => p.map(s => s.id === session.id ? { ...s, leave_count: 0, status: 'active', reset_at: new Date().toISOString() } : s))
+    if (error) {
+      toast.error('ส่งไม่สำเร็จ กรุณาลองใหม่')
+      setSubmitting(false)
+      return
     }
-    setResetting(null)
+    router.push(`/dashboard/quizzes/${quiz.id}/result`)
   }
 
-  const blocked = sessions.filter(s => s.status === 'blocked' || s.leave_count >= 3)
-  const warned = sessions.filter(s => s.status !== 'blocked' && s.leave_count < 3)
+  function confirmLeave() {
+    if (confirm('⚠️ ออกจากแบบทดสอบ? คำตอบที่บันทึกไว้จะยังคงอยู่')) {
+      Object.values(debounceTimers.current).forEach(t => clearTimeout(t))
+      timer.stop()
+      saveDraft(answersRef.current)
+      supabase
+        .from('quiz_sessions')
+        .update({ status: 'left' })
+        .eq('student_id', userId)
+        .eq('quiz_id', quiz.id)
+      router.push('/dashboard/quizzes')
+    }
+  }
 
-  return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 16 }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: "var(--surface)", borderRadius: 20, width: "100%", maxWidth: 620, maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid var(--border)" }}>
-          <div>
-            <h3 style={{ fontWeight: 700, fontSize: 15 }}>การออกกลางคัน</h3>
-            <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>{quizTitle}</p>
-          </div>
-          <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
-        </div>
+  // ── Derived ──────────────────────────────────────────────────────
+  const answered        = Object.keys(answers).length
+  const remaining       = MAX_LEAVES - warnings
+  const currentQ        = questions[currentIndex]
+  const isLast          = currentIndex === questions.length - 1
+  const progressPercent = questions.length > 0
+    ? ((currentIndex + 1) / questions.length) * 100
+    : 0
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
-          {loading ? (
-            <p style={{ color: "var(--text-3)", fontSize: 13, textAlign: "center", padding: "20px 0" }}>กำลังโหลด...</p>
-          ) : sessions.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "30px 0", color: "var(--text-3)" }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>✅</div>
-              <p style={{ fontSize: 13 }}>ไม่มีนักเรียนที่ออกกลางคัน</p>
-            </div>
-          ) : (
-            <>
-              {blocked.length > 0 && (
-                <div style={{ marginBottom: 20 }}>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: "var(--red)", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
-                    <AlertTriangle size={13} /> ถูกล็อค ({blocked.length} คน)
-                  </p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {blocked.map(s => (
-                      <SessionRow key={s.id} session={s} onReset={resetStudent} resetting={resetting === s.id} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {warned.length > 0 && (
-                <div>
-                  <p style={{ fontSize: 12, fontWeight: 700, color: "var(--amber)", marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}>
-                    <AlertTriangle size={13} /> มีประวัติออก ({warned.length} คน)
-                  </p>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {warned.map(s => (
-                      <SessionRow key={s.id} session={s} onReset={resetStudent} resetting={resetting === s.id} />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body
-  )
-}
-
-function SessionRow({ session, onReset, resetting }: { session: Session; onReset: (s: Session) => void; resetting: boolean }) {
-  const isBlocked = session.status === 'blocked' || session.leave_count >= 3
-  const name = session.student?.nickname ?? session.student?.full_name ?? '-'
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "10px 14px", borderRadius: 10, border: `1.5px solid ${isBlocked ? 'rgba(220,38,38,0.3)' : 'rgba(217,119,6,0.3)'}`, background: isBlocked ? 'var(--red-light)' : 'var(--amber-light)' }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontWeight: 700, fontSize: 13 }}>{name}
-          {session.student?.grade && <span style={{ fontSize: 11, color: "var(--text-3)", marginLeft: 6, fontWeight: 400 }}>{session.student.grade}</span>}
-        </p>
-        {session.student?.student_id && <p style={{ fontSize: 11, color: "var(--text-3)" }}>รหัส {session.student.student_id}</p>}
-      </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: isBlocked ? 'var(--red)' : 'var(--amber)' }}>{session.leave_count}</div>
-          <div style={{ fontSize: 10, color: "var(--text-3)" }}>ครั้ง</div>
-        </div>
-        <span className={`badge ${isBlocked ? 'badge-red' : 'badge-amber'}`}>
-          {isBlocked ? '🚫 ล็อค' : '⚠️ เตือน'}
-        </span>
-        {session.reset_at ? (
-          <span className="badge badge-green" style={{ fontSize: 10 }}>✓ รีเซ็ตแล้ว</span>
-        ) : (
-          <button className="btn btn-sm btn-primary" onClick={() => onReset(session)} disabled={resetting} style={{ fontSize: 11 }}>
-            {resetting ? <div className="spinner" style={{ width: 12, height: 12 }} /> : <><RefreshCw size={11} /> อนุญาต</>}
+  // ── Blocked screen ───────────────────────────────────────────────
+  if (blocked) {
+    return (
+      <div style={{ maxWidth: 480, margin: '80px auto', textAlign: 'center', padding: '0 16px' }}>
+        <div className="card" style={{ padding: 40, border: '2px solid var(--red)' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>🚫</div>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--red)', marginBottom: 8 }}>
+            ถูกล็อคการทำข้อสอบ
+          </h2>
+          <p style={{ fontSize: 13, color: 'var(--text-2)', lineHeight: 1.7, marginBottom: 20 }}>
+            ออกจากหน้าแบบทดสอบเกิน {MAX_LEAVES} ครั้ง<br />
+            กรุณาติดต่อครูผู้สอนเพื่อขออนุญาตทำซ้ำ
+          </p>
+          <button
+            className="btn"
+            style={{ color: 'var(--red)' }}
+            onClick={() => router.push('/dashboard/quizzes')}
+          >
+            กลับหน้าหลัก
           </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── No questions ─────────────────────────────────────────────────
+  if (questions.length === 0) {
+    return (
+      <div style={{ maxWidth: 480, margin: '80px auto', textAlign: 'center', padding: '0 16px' }}>
+        <div className="card" style={{ padding: 40 }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📭</div>
+          <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>ยังไม่มีข้อสอบ</h2>
+          <p style={{ fontSize: 13, color: 'var(--text-2)' }}>
+            แบบทดสอบนี้ยังไม่มีข้อสอบ กรุณาติดต่อครูผู้สอน
+          </p>
+          <button
+            className="btn btn-primary"
+            style={{ marginTop: 16 }}
+            onClick={() => router.push('/dashboard/quizzes')}
+          >
+            กลับ
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Sub-components ───────────────────────────────────────────────
+  const SaveIndicator = () => {
+    if (saveStatus === 'idle') return null
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 11, fontWeight: 600,
+        color: saveStatus === 'saved' ? 'var(--green)' : 'var(--text-3)',
+        transition: 'opacity 0.3s',
+      }}>
+        {saveStatus === 'saving'
+          ? <><div className="spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />บันทึก...</>
+          : <><Save size={10} />บันทึกแล้ว</>
+        }
+      </span>
+    )
+  }
+
+  const ProgressDots = () => (
+    <div className="card" style={{ padding: '14px 18px', marginBottom: 16 }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10,
+      }}>
+        <span style={{
+          fontSize: 10, fontWeight: 700, color: 'var(--text-3)',
+          letterSpacing: '0.08em', textTransform: 'uppercase',
+        }}>
+          Question Progress
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SaveIndicator />
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#2563eb' }}>
+            {answered}/{questions.length} ตอบแล้ว
+          </span>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+        {questions.map((q, i) => {
+          const isAnswered = answers[q.id] !== undefined
+          const isCurrent  = i === currentIndex
+          return (
+            <button key={q.id} onClick={() => navigate(i)} style={{
+              width: 32, height: 32, borderRadius: 8, fontSize: 11, fontWeight: 700,
+              cursor: 'pointer', transition: 'all 0.15s',
+              transform: isCurrent ? 'scale(1.15)' : 'scale(1)',
+              background: isCurrent ? '#2563eb' : isAnswered ? 'rgba(5,150,105,0.1)' : 'var(--surface)',
+              color:      isCurrent ? 'white'    : isAnswered ? '#059669'              : 'var(--text-3)',
+              border:     isCurrent ? '2px solid #2563eb'
+                        : isAnswered ? '2px solid rgba(5,150,105,0.45)'
+                        : '1.5px solid var(--border)',
+              boxShadow: isCurrent ? '0 4px 12px rgba(37,99,235,0.28)'
+                       : isAnswered ? '0 2px 6px rgba(5,150,105,0.12)'
+                       : 'none',
+            }}>
+              {i + 1}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+
+  const MCQOptions = ({ q }: { q: Question }) => {
+    const opts = q.options as { label: string; text: string }[]
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {opts.map((opt, oi) => {
+          const selected = answers[q.id] === oi
+          const c = OPT_COLORS[oi % OPT_COLORS.length]
+          return (
+            <button key={oi} onClick={() => handleMCQAnswer(q.id, oi)} style={{
+              display: 'flex', alignItems: 'center', gap: 14,
+              padding: '14px 18px', borderRadius: 14, cursor: 'pointer',
+              textAlign: 'left', fontFamily: 'inherit', width: '100%',
+              background: selected ? c.bg : 'var(--surface)',
+              border:     `2px solid ${selected ? c.border : 'var(--border)'}`,
+              boxShadow:  selected ? `0 5px 18px ${c.border}22` : '0 1px 4px rgba(0,0,0,0.04)',
+              transition: 'all 0.15s',
+            }}>
+              <span style={{
+                width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                background: selected ? c.labelBg : '#f1f5f9',
+                color:      selected ? 'white'   : 'var(--text-2)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 13, fontWeight: 800, transition: 'all 0.15s',
+                boxShadow: selected ? `0 3px 10px ${c.border}44` : 'none',
+              }}>
+                {LABELS[oi] ?? opt.label}
+              </span>
+              <span style={{
+                fontSize: 14, fontWeight: selected ? 700 : 500,
+                color: selected ? c.text : 'var(--text)', flex: 1, lineHeight: 1.4,
+              }}>
+                {opt.text}
+              </span>
+              {selected && <CheckCircle2 size={18} color={c.border} style={{ flexShrink: 0 }} />}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // RENDER
+  // ════════════════════════════════════════════════════════════════
+  return (
+    <>
+      <style>{`
+        .qa-header { position: sticky; top: 0; z-index: 20; background: var(--bg); padding-bottom: 4px; }
+        .qa-mobile-meta { display: none; }
+        .qa-desktop-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 900px; margin: 0 auto; }
+        .qa-grid { display: grid; grid-template-columns: 7fr 5fr; gap: 14px; }
+        .qa-nav-inline { display: flex; align-items: center; justify-content: space-between; padding-bottom: 24px; gap: 10px; }
+        .qa-nav-fixed { display: none; }
+
+        @media (max-width: 767px) {
+          .qa-desktop-topbar { display: none !important; }
+          .qa-mobile-meta { display: flex; }
+          .qa-desktop-wrap { max-width: 100%; padding: 0 16px; padding-bottom: 100px; gap: 16px; }
+          .qa-grid { grid-template-columns: 1fr; }
+          .qa-nav-inline { display: none; }
+          .qa-nav-fixed { display: block; }
+          .qa-question-text { font-size: 22px !important; text-align: center; }
+          .qa-q-canvas { padding: 24px 20px !important; min-height: unset !important; }
+        }
+      `}</style>
+
+      {/* ══ STICKY HEADER ════════════════════════════════════════ */}
+      <div className="qa-header">
+        <div className="qa-desktop-topbar">
+          <div className="card" style={{ padding: '12px 18px' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+              gap: 12, flexWrap: 'wrap',
+            }}>
+              <div>
+                <h2 style={{ fontWeight: 700, fontSize: 15 }}>{quiz.title}</h2>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                  <p style={{ fontSize: 12, color: 'var(--text-3)' }}>
+                    ตอบแล้ว {answered}/{questions.length} ข้อ
+                  </p>
+                  <SaveIndicator />
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{
+                  padding: '5px 11px', borderRadius: 99, fontSize: 12, fontWeight: 700,
+                  background: warnings >= 2 ? 'var(--red-light)' : warnings >= 1 ? 'var(--amber-light)' : 'var(--green-light)',
+                  color:      warnings >= 2 ? 'var(--red)'       : warnings >= 1 ? 'var(--amber)'       : 'var(--green)',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                }}>
+                  <AlertTriangle size={11} />
+                  ออกแล้ว {warnings}/{MAX_LEAVES}
+                </div>
+                {quiz.time_limit && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    padding: '6px 14px', borderRadius: 'var(--r-md)',
+                    background: timer.isDanger ? 'var(--red-light)'   : timer.isWarning ? 'var(--amber-light)' : 'var(--blue-light)',
+                    border: `1px solid ${timer.isDanger ? 'rgba(220,38,38,0.2)' : timer.isWarning ? 'rgba(217,119,6,0.2)' : 'rgba(37,99,235,0.2)'}`,
+                  }}>
+                    <Clock
+                      size={14}
+                      color={timer.isDanger ? 'var(--red)' : timer.isWarning ? 'var(--amber)' : 'var(--blue)'}
+                    />
+                    <span style={{
+                      fontSize: 20, fontWeight: 800, fontVariantNumeric: 'tabular-nums',
+                      letterSpacing: '-0.02em',
+                      color: timer.isDanger ? 'var(--red)' : timer.isWarning ? 'var(--amber)' : 'var(--blue)',
+                    }}>
+                      {timer.display}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="progress" style={{ marginTop: 8, height: 4 }}>
+              <div
+                className="progress-fill"
+                style={{
+                  width: `${(answered / questions.length) * 100}%`,
+                  background: 'var(--blue)', transition: 'width 0.4s ease',
+                }}
+              />
+            </div>
+            {quiz.time_limit && (
+              <div className="progress" style={{ marginTop: 3, height: 3 }}>
+                <div
+                  className="progress-fill"
+                  style={{
+                    width: `${timer.percent}%`,
+                    background: timer.isDanger ? 'var(--red)' : timer.isWarning ? 'var(--amber)' : 'var(--green)',
+                    transition: 'width 1s linear, background 0.5s',
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile progress bar */}
+        <div style={{ height: 3, background: 'var(--border)' }} className="qa-mobile-meta">
+          <div style={{
+            height: '100%', width: `${progressPercent}%`,
+            background: 'linear-gradient(90deg,#2563eb,#60a5fa)',
+            borderRadius: '0 4px 4px 0', transition: 'width 0.4s ease',
+            boxShadow: '0 0 8px rgba(37,99,235,0.4)',
+          }} />
+        </div>
+
+        {warnings > 0 && warnings < MAX_LEAVES && (
+          <div className="alert alert-danger" style={{ margin: '6px 0 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertTriangle size={13} />
+            <span style={{ fontSize: 12 }}>
+              คำเตือน: ออกจากหน้าแล้ว {warnings}/{MAX_LEAVES} — เหลืออีก {remaining} ครั้งก่อนถูกล็อค
+            </span>
+          </div>
         )}
       </div>
-    </div>
-  )
-}
 
-// =============================================
-// QUIZ FORM MODAL
-// =============================================
-function QuizFormModal({ mode, quiz, onClose, onSaved }: { mode: "add" | "edit"; quiz?: QuizRow; onClose: () => void; onSaved: (q: QuizRow) => void }) {
-  const [form, setForm] = useState({
-    title: quiz?.title ?? "",
-    description: quiz?.description ?? "",
-    pass_score: quiz?.pass_score ?? 60,
-    time_limit: quiz?.time_limit ?? "" as number | string,
-    is_open: quiz?.is_open ?? false,
-    opens_at: quiz?.opens_at ? quiz.opens_at.slice(0, 16) : "",
-    closes_at: quiz?.closes_at ? quiz.closes_at.slice(0, 16) : "",
-  })
-  const [saving, setSaving] = useState(false)
-  const supabase = createClient()
-
-  async function save() {
-    if (!form.title.trim()) { toast.error("กรุณาใส่ชื่อ"); return }
-    setSaving(true)
-    const { data: { user } } = await supabase.auth.getUser()
-    const payload = {
-      title: form.title, description: form.description || null,
-      pass_score: Number(form.pass_score),
-      time_limit: form.time_limit ? Number(form.time_limit) : null,
-      is_open: form.is_open,
-      opens_at: form.opens_at || null, closes_at: form.closes_at || null,
-      created_by: user?.id,
-    }
-    let data, error
-    if (mode === "add") {
-      ;({ data, error } = await supabase.from("quizzes").insert(payload).select("*, questions(count)").single())
-    } else {
-      ;({ data, error } = await supabase.from("quizzes").update(payload).eq("id", quiz!.id).select("*, questions(count)").single())
-    }
-    if (error || !data) { toast.error("บันทึกไม่สำเร็จ"); setSaving(false); return }
-    onSaved(data); setSaving(false)
-  }
-
-  return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 9999, padding: "24px 16px", overflowY: "auto" }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: "var(--surface)", borderRadius: 20, width: "100%", maxWidth: 520, display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", margin: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 16px", borderBottom: "1px solid var(--border)" }}>
-          <h3 style={{ fontWeight: 700, fontSize: 16 }}>{mode === "add" ? "สร้างแบบทดสอบ" : "แก้ไขแบบทดสอบ"}</h3>
-          <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
-        </div>
-        <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>
-          <div><label className="form-label">ชื่อแบบทดสอบ *</label><input className="input" value={form.title} onChange={e => setForm(p => ({ ...p, title: e.target.value }))} /></div>
-          <div><label className="form-label">คำอธิบาย</label><textarea className="input" rows={2} value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))} style={{ resize: "vertical" }} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div><label className="form-label">คะแนนผ่าน (%)</label><input type="number" min={0} max={100} className="input" value={form.pass_score} onChange={e => setForm(p => ({ ...p, pass_score: Number(e.target.value) }))} /></div>
-            <div><label className="form-label">เวลา (นาที)</label><input type="number" min={0} className="input" value={form.time_limit} onChange={e => setForm(p => ({ ...p, time_limit: e.target.value }))} placeholder="ไม่จำกัด" /></div>
+      {/* ══ MAIN CONTENT ════════════════════════════════════════════ */}
+      <div className="qa-desktop-wrap">
+        {/* Mobile meta pills */}
+        <div className="qa-mobile-meta" style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 16, gap: 8 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+            borderRadius: 99, background: 'var(--surface)', border: '1px solid var(--border)',
+            fontSize: 12, fontWeight: 700, color: '#2563eb',
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+          }}>
+            <Clock size={12} />
+            {quiz.time_limit ? `${timer.display} LEFT` : 'ไม่จำกัดเวลา'}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div><label className="form-label">วันเปิด</label><input type="datetime-local" className="input" value={form.opens_at} onChange={e => setForm(p => ({ ...p, opens_at: e.target.value }))} /></div>
-            <div><label className="form-label">วันปิด</label><input type="datetime-local" className="input" value={form.closes_at} onChange={e => setForm(p => ({ ...p, closes_at: e.target.value }))} /></div>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '5px 11px', borderRadius: 99,
+            background: warnings >= 2 ? 'var(--red-light)' : warnings >= 1 ? 'var(--amber-light)' : 'transparent',
+            border: '1px solid var(--border)',
+            fontSize: 11, fontWeight: 700,
+            color: warnings >= 2 ? 'var(--red)' : warnings >= 1 ? 'var(--amber)' : 'var(--text-3)',
+          }}>
+            <AlertTriangle size={11} /> ออกแล้ว {warnings}/{MAX_LEAVES}
           </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
-            <input type="checkbox" checked={form.is_open} onChange={e => setForm(p => ({ ...p, is_open: e.target.checked }))} />
-            เปิดให้ทำแบบทดสอบทันที
-          </label>
-        </div>
-        <div style={{ padding: "14px 24px", borderTop: "1px solid var(--border)", display: "flex", gap: 10, justifyContent: "flex-end" }}>
-          <button className="btn" onClick={onClose}>ยกเลิก</button>
-          <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? <><div className="spinner" />บันทึก...</> : "บันทึก"}</button>
-        </div>
-      </div>
-    </div>,
-    document.body
-  )
-}
-
-// =============================================
-// QUESTION MANAGER MODAL
-// =============================================
-function QuestionManagerModal({ quizId, quizTitle, onClose }: { quizId: string; quizTitle: string; onClose: () => void }) {
-  const [questions, setQuestions] = useState<Question[]>([])
-  const [loading, setLoading] = useState(true)
-  const [mode, setMode] = useState<'list' | 'single' | 'bulk'>('list')
-  const [bulkText, setBulkText] = useState("")
-  const supabase = createClient()
-
-  useEffect(() => {
-    supabase.from("questions").select("*").eq("quiz_id", quizId).order("sort_order").then(({ data }) => {
-      setQuestions(data ?? [])
-      setLoading(false)
-    })
-  }, [])
-
-  async function deleteQ(id: string) {
-    await supabase.from("questions").delete().eq("id", id)
-    setQuestions(p => p.filter(q => q.id !== id))
-    toast.success("ลบแล้ว")
-  }
-
-  function parseBulkMCQ(text: string): Partial<Question>[] {
-    const blocks = text.trim().split(/\n{2,}/).filter(b => b.trim())
-    return blocks.map((block, i) => {
-      const lines = block.split("\n").map(l => l.trim()).filter(Boolean)
-      const question_text = lines[0].replace(/^\d+\.\s*/, "")
-      const options: QuizOption[] = []
-      let correct_answer = "0"
-      lines.slice(1).forEach(line => {
-        const m = line.match(/^([A-Da-d])[.)]\s*(.+)/)
-        if (m) {
-          const idx = m[1].toUpperCase().charCodeAt(0) - 65
-          options.push({ label: m[1].toUpperCase(), text: m[2].replace(/\*$/, "").trim() })
-          if (line.includes("*")) correct_answer = String(idx)
-        }
-      })
-      return { type: "mcq" as const, question_text, options, correct_answer, sort_order: questions.length + i, quiz_id: quizId, points: 1 }
-    }).filter(q => q.question_text && (q.options as QuizOption[])?.length > 0)
-  }
-
-  async function importBulk() {
-    const parsed = parseBulkMCQ(bulkText)
-    if (!parsed.length) { toast.error("ไม่พบข้อสอบที่ถูกรูปแบบ"); return }
-    const { data, error } = await supabase.from("questions").insert(parsed).select()
-    if (error) { toast.error("นำเข้าไม่สำเร็จ: " + error.message); return }
-    setQuestions(p => [...p, ...(data ?? [])])
-    setBulkText(""); setMode('list')
-    toast.success(`นำเข้า ${data?.length} ข้อ ✓`)
-  }
-
-  return createPortal(
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999, padding: 16 }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: "var(--surface)", borderRadius: 20, width: "100%", maxWidth: 700, maxHeight: "90vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid var(--border)", flexShrink: 0 }}>
-          <div>
-            <h3 style={{ fontWeight: 700, fontSize: 15 }}>จัดการข้อสอบ</h3>
-            <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 1 }}>{quizTitle} · {questions.length} ข้อ</p>
+          <div style={{
+            padding: '6px 14px', borderRadius: 99, background: 'var(--surface)',
+            border: '1px solid var(--border)', fontSize: 12, fontWeight: 700,
+            color: 'var(--text-2)', letterSpacing: '0.04em', textTransform: 'uppercase',
+          }}>
+            Q {currentIndex + 1} / {questions.length}
           </div>
-          <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
         </div>
 
-        {/* Toolbar */}
-        <div style={{ padding: "12px 24px", borderBottom: "1px solid var(--border)", display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
-          <button className={`btn btn-sm ${mode === 'single' ? 'btn-primary' : ''}`} onClick={() => setMode(mode === 'single' ? 'list' : 'single')}>
-            <Plus size={12} /> เพิ่ม 1 ข้อ
-          </button>
-          <button className={`btn btn-sm ${mode === 'bulk' ? 'btn-primary' : ''}`} onClick={() => setMode(mode === 'bulk' ? 'list' : 'bulk')}>
-            📋 วางหลายข้อ (Bulk)
-          </button>
-        </div>
+        <ProgressDots />
 
-        <div style={{ flex: 1, overflowY: "auto", padding: "16px 24px" }}>
-          {/* Single add form */}
-          {mode === 'single' && (
-            <AddQuestionForm
-              quizId={quizId}
-              sortOrder={questions.length}
-              onSaved={q => { setQuestions(p => [...p, q]); setMode('list') }}
-              onCancel={() => setMode('list')}
-            />
-          )}
-
-          {/* Bulk import */}
-          {mode === 'bulk' && (
-            <div style={{ background: "var(--blue-light)", borderRadius: 12, padding: 16, marginBottom: 16, border: "1px solid rgba(37,99,235,0.2)" }}>
-              <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>📋 วางข้อสอบปรนัยหลายข้อ</p>
-              <p style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>แต่ละข้อคั่นด้วยบรรทัดว่าง ใส่ <strong>*</strong> หลังตัวเลือกที่ถูกต้อง</p>
-              <div style={{ background: 'rgba(0,0,0,0.04)', borderRadius: 8, padding: '8px 10px', fontSize: 11, fontFamily: 'monospace', color: 'var(--text-2)', marginBottom: 10, lineHeight: 1.7 }}>
-                {'1. She ___ to school.\nA. go\nB. goes*\nC. going\nD. gone\n\n2. They ___ friends.\nA. is\nB. am\nC. are*\nD. be'}
-              </div>
-              <textarea
-                className="input"
-                rows={10}
-                value={bulkText}
-                onChange={e => setBulkText(e.target.value)}
-                style={{ fontFamily: "monospace", fontSize: 12, resize: "vertical", marginBottom: 10 }}
-                placeholder={"1. คำถามข้อ 1\nA. ตัวเลือก A\nB. ตัวเลือก B*\nC. ตัวเลือก C\nD. ตัวเลือก D\n\n2. คำถามข้อ 2\n..."}
-              />
-              <p style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 8 }}>
-                ตรวจพบ {parseBulkMCQ(bulkText).length} ข้อ
-              </p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-sm" onClick={() => setMode('list')}>ยกเลิก</button>
-                <button className="btn btn-primary btn-sm" onClick={importBulk} disabled={!bulkText.trim()}>
-                  นำเข้า {parseBulkMCQ(bulkText).length} ข้อ
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Question list */}
-          {loading ? (
-            <p style={{ color: "var(--text-3)", fontSize: 13 }}>กำลังโหลด...</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {questions.length === 0 && mode === 'list' && (
-                <p style={{ color: "var(--text-3)", fontSize: 13, textAlign: "center", padding: "24px 0" }}>ยังไม่มีข้อสอบ — คลิก "เพิ่ม 1 ข้อ" หรือ "วางหลายข้อ"</p>
-              )}
-              {questions.map((q, i) => (
-                <div key={q.id} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 10, background: 'var(--surface)' }}>
-                  <div style={{ width: 26, height: 26, borderRadius: 7, background: q.type === "mcq" ? "var(--blue-light)" : q.type === "fill" ? "var(--green-light)" : "var(--amber-light)", color: q.type === "mcq" ? "var(--blue)" : q.type === "fill" ? "var(--green)" : "var(--amber)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{i + 1}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, color: "var(--text)", lineHeight: 1.5, wordBreak: 'break-word' }}>{q.question_text}</p>
-                    {q.type === 'mcq' && q.options && (
-                      <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {(q.options as QuizOption[]).map((opt, oi) => (
-                          <span key={oi} style={{ fontSize: 11, padding: '2px 8px', borderRadius: 6, background: String(oi) === String(q.correct_answer) ? 'var(--green-light)' : 'rgba(0,0,0,0.04)', color: String(oi) === String(q.correct_answer) ? 'var(--green)' : 'var(--text-3)', fontWeight: String(oi) === String(q.correct_answer) ? 700 : 400, border: String(oi) === String(q.correct_answer) ? '1px solid rgba(34,197,94,0.3)' : '1px solid transparent' }}>
-                            {opt.label}. {opt.text}{String(oi) === String(q.correct_answer) ? ' ✓' : ''}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div style={{ marginTop: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span className={`badge ${q.type === "mcq" ? "badge-blue" : q.type === "fill" ? "badge-green" : "badge-amber"}`} style={{ fontSize: 10 }}>
-                        {q.type === "mcq" ? "ปรนัย" : q.type === "fill" ? "เติมคำ" : "อัตนัย"}
-                      </span>
-                      <span style={{ fontSize: 10, color: 'var(--text-3)' }}>{q.points} คะแนน</span>
-                    </div>
+        {/* ── Question area ── */}
+        {currentQ && (
+          <>
+            {currentQ.type === 'mcq' && currentQ.options ? (
+              <div className="qa-grid fade-up">
+                <div className="card qa-q-canvas" style={{ padding: '30px 32px', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: 240 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                    <span style={{
+                      width: 30, height: 30, borderRadius: '50%',
+                      background: 'var(--blue-light)', color: 'var(--blue)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, fontWeight: 800,
+                    }}>
+                      Q{currentIndex + 1}
+                    </span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: 'var(--text-3)',
+                      letterSpacing: '0.1em', textTransform: 'uppercase',
+                    }}>
+                      Multiple Choice
+                    </span>
                   </div>
-                  <button className="btn btn-sm btn-danger" style={{ flexShrink: 0 }} onClick={() => deleteQ(q.id)}><Trash2 size={12} /></button>
+                  <p className="qa-question-text" style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)', lineHeight: 1.7 }}>
+                    {currentQ.question_text}
+                  </p>
                 </div>
-              ))}
-            </div>
+                <MCQOptions q={currentQ} />
+              </div>
+            ) : (
+              <div className="card fade-up" style={{ padding: '30px 32px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <span style={{
+                    width: 30, height: 30, borderRadius: '50%', fontSize: 11, fontWeight: 800,
+                    background: currentQ.type === 'fill' ? 'var(--green-light)' : 'var(--amber-light)',
+                    color:      currentQ.type === 'fill' ? 'var(--green)'       : 'var(--amber)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    Q{currentIndex + 1}
+                  </span>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, color: 'var(--text-3)',
+                    letterSpacing: '0.1em', textTransform: 'uppercase',
+                  }}>
+                    {currentQ.type === 'fill' ? 'Fill in the Blank' : 'Essay'}
+                  </span>
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-3)', fontWeight: 500 }}>
+                    {currentQ.type === 'fill' ? '💾 บันทึกอัตโนมัติทุก 30 วิ' : '💾 บันทึกอัตโนมัติทุก 1.5 นาที'}
+                  </span>
+                </div>
+                <p className="qa-question-text" style={{ fontSize: 18, fontWeight: 700, lineHeight: 1.7, marginBottom: 20 }}>
+                  {currentQ.question_text}
+                </p>
+                {currentQ.type === 'fill' ? (
+                  <input
+                    className="input"
+                    placeholder="พิมพ์คำตอบ..."
+                    value={String(answers[currentQ.id] ?? '')}
+                    onChange={e => handleTextAnswer(currentQ.id, e.target.value, 'fill')}
+                    style={{ fontSize: 15 }}
+                  />
+                ) : (
+                  <textarea
+                    className="input"
+                    rows={6}
+                    placeholder="เขียนคำตอบ..."
+                    value={String(answers[currentQ.id] ?? '')}
+                    onChange={e => handleTextAnswer(currentQ.id, e.target.value, 'essay')}
+                    style={{ resize: 'vertical', fontSize: 14, minHeight: 140 }}
+                  />
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ══ DESKTOP NAV ══════════════════════════════════════════ */}
+        <div className="qa-nav-inline">
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn" style={{ color: 'var(--red)', gap: 6 }} onClick={confirmLeave}>
+              <LogOut size={13} /> ออก
+            </button>
+            <button
+              className="btn"
+              onClick={() => navigate(currentIndex - 1)}
+              disabled={currentIndex === 0}
+              style={{ gap: 6 }}
+            >
+              <ArrowLeft size={14} /> ข้อก่อนหน้า
+            </button>
+          </div>
+          {isLast ? (
+            <button className="btn btn-primary" onClick={doSubmit} disabled={submitting} style={{ gap: 8 }}>
+              {submitting
+                ? <><div className="spinner" />กำลังส่ง...</>
+                : <><Send size={14} />ส่งแบบทดสอบ ({answered}/{questions.length} ข้อ)</>
+              }
+            </button>
+          ) : (
+            <button className="btn btn-primary" onClick={() => navigate(currentIndex + 1)} style={{ gap: 6 }}>
+              ข้อถัดไป <ArrowRight size={14} />
+            </button>
           )}
         </div>
       </div>
-    </div>,
-    document.body
-  )
-}
 
-// =============================================
-// ADD SINGLE QUESTION FORM
-// =============================================
-function AddQuestionForm({ quizId, sortOrder, onSaved, onCancel }: { quizId: string; sortOrder: number; onSaved: (q: Question) => void; onCancel: () => void }) {
-  const [type, setType] = useState<"mcq" | "fill" | "essay">("mcq")
-  const [questionText, setQuestionText] = useState("")
-  const [options, setOptions] = useState([{ label: "A", text: "" }, { label: "B", text: "" }, { label: "C", text: "" }, { label: "D", text: "" }])
-  const [correctIndex, setCorrectIndex] = useState(0)
-  const [fillAnswer, setFillAnswer] = useState("")
-  const [points, setPoints] = useState(1)
-  const [saving, setSaving] = useState(false)
-  const [addAnother, setAddAnother] = useState(false)
-  const supabase = createClient()
-
-  async function save(andContinue = false) {
-    if (!questionText.trim()) { toast.error("กรุณาใส่คำถาม"); return }
-    if (type === 'mcq' && options.some(o => !o.text.trim())) { toast.error("กรุณาใส่ตัวเลือกให้ครบ"); return }
-    setSaving(true)
-    const payload: Partial<Question> = {
-      quiz_id: quizId, type, question_text: questionText,
-      options: type === "mcq" ? options : null,
-      correct_answer: type === "mcq" ? String(correctIndex) : type === "fill" ? fillAnswer : null,
-      points, sort_order: sortOrder,
-    }
-    const { data, error } = await supabase.from("questions").insert(payload).select().single()
-    if (error || !data) { toast.error("เพิ่มไม่สำเร็จ: " + error?.message); setSaving(false); return }
-    toast.success("เพิ่มข้อสอบแล้ว ✓")
-    onSaved(data)
-    if (andContinue) {
-      setQuestionText(""); setOptions([{ label: "A", text: "" }, { label: "B", text: "" }, { label: "C", text: "" }, { label: "D", text: "" }]); setCorrectIndex(0); setFillAnswer("")
-      setSaving(false)
-    } else {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div style={{ background: "var(--blue-light)", borderRadius: 12, padding: 16, marginBottom: 16, border: "1px solid rgba(37,99,235,0.2)" }}>
-      <p style={{ fontSize: 13, fontWeight: 700, marginBottom: 10 }}>เพิ่มข้อสอบใหม่</p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
-        {(["mcq", "fill", "essay"] as const).map(t => (
-          <button key={t} onClick={() => setType(t)} className={`btn btn-sm ${type === t ? "btn-primary" : ""}`} style={{ justifyContent: "center" }}>
-            {t === "mcq" ? "ปรนัย" : t === "fill" ? "เติมคำ" : "อัตนัย"}
-          </button>
-        ))}
-      </div>
-      <textarea className="input" rows={2} placeholder="คำถาม..." value={questionText} onChange={e => setQuestionText(e.target.value)} style={{ marginBottom: 10, resize: "vertical" }} />
-      {type === "mcq" && options.map((opt, i) => (
-        <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-          <input type="radio" name="correct" checked={correctIndex === i} onChange={() => setCorrectIndex(i)} />
-          <span style={{ fontSize: 12, fontWeight: 700, width: 20 }}>{opt.label}.</span>
-          <input className="input" style={{ fontSize: 13 }} value={opt.text} onChange={e => setOptions(p => p.map((o, j) => j === i ? { ...o, text: e.target.value } : o))} placeholder={`ตัวเลือก ${opt.label}`} />
+      {/* ══ MOBILE FIXED BOTTOM BAR ══════════════════════════════ */}
+      <div className="qa-nav-fixed">
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 40,
+          background: 'rgba(249,249,255,0.93)', backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)', borderTop: '1px solid var(--border)',
+          padding: '12px 20px 24px', boxShadow: '0 -8px 30px rgba(20,27,43,0.07)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <button
+              onClick={() => navigate(currentIndex - 1)}
+              disabled={currentIndex === 0}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '10px 18px', borderRadius: 99,
+                background: 'transparent', border: 'none',
+                cursor: currentIndex === 0 ? 'not-allowed' : 'pointer',
+                color: currentIndex === 0 ? 'var(--text-3)' : '#2563eb',
+                fontWeight: 700, fontSize: 14, fontFamily: 'inherit',
+                opacity: currentIndex === 0 ? 0.4 : 1,
+              }}
+            >
+              <ArrowLeft size={16} /> Previous
+            </button>
+            {isLast ? (
+              <button onClick={doSubmit} disabled={submitting} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '12px 26px', borderRadius: 99,
+                background: 'linear-gradient(135deg,#2563eb,#3b82f6)', color: 'white',
+                fontWeight: 800, fontSize: 13, letterSpacing: '0.08em', textTransform: 'uppercase',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                boxShadow: '0 8px 20px rgba(37,99,235,0.3)',
+              }}>
+                {submitting
+                  ? <><div className="spinner" style={{ borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white' }} />ส่ง...</>
+                  : <><Send size={14} />ส่ง ({answered}/{questions.length})</>
+                }
+              </button>
+            ) : (
+              <button onClick={() => navigate(currentIndex + 1)} style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '12px 28px', borderRadius: 99,
+                background: 'linear-gradient(135deg,#2563eb,#3b82f6)', color: 'white',
+                fontWeight: 800, fontSize: 13, letterSpacing: '0.08em', textTransform: 'uppercase',
+                border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                boxShadow: '0 8px 20px rgba(37,99,203,0.3)',
+              }}>
+                Next <ArrowRight size={16} />
+              </button>
+            )}
+          </div>
         </div>
-      ))}
-      {type === "fill" && <input className="input" style={{ marginBottom: 10 }} placeholder="คำตอบที่ถูกต้อง..." value={fillAnswer} onChange={e => setFillAnswer(e.target.value)} />}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <label style={{ fontSize: 12, color: "var(--text-2)" }}>คะแนน:</label>
-        <input type="number" min={1} className="input" style={{ width: 70 }} value={points} onChange={e => setPoints(Number(e.target.value))} />
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn btn-sm" onClick={onCancel}>ยกเลิก</button>
-        <button className="btn btn-primary btn-sm" onClick={() => save(false)} disabled={saving}>
-          {saving ? "บันทึก..." : "บันทึก"}
-        </button>
-        <button className="btn btn-sm" style={{ background: 'rgba(0,80,203,0.15)', color: 'var(--blue)', fontWeight: 700 }} onClick={() => save(true)} disabled={saving}>
-          <Plus size={11} /> บันทึก & เพิ่มข้อต่อไป
-        </button>
-      </div>
-    </div>
+    </>
   )
 }

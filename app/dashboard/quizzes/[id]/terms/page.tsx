@@ -1,12 +1,14 @@
 import { createClient } from '@/lib/supabase/server'
 import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { ClipboardList, Clock, Target, AlertTriangle } from 'lucide-react'
+import { ClipboardList, Clock, AlertTriangle } from 'lucide-react'
 
 export default async function QuizTermsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
+
+  if (!user) redirect('/login')
 
   const { data: quiz } = await supabase
     .from('quizzes')
@@ -17,15 +19,29 @@ export default async function QuizTermsPage({ params }: { params: Promise<{ id: 
   if (!quiz) notFound()
   if (!quiz.is_open) redirect('/dashboard/quizzes')
 
-  // Check if already submitted
+  // ✅ เช็ค submission
   const { data: submission } = await supabase
     .from('submissions')
     .select('id')
     .eq('quiz_id', id)
-    .eq('student_id', user!.id)
-    .single()
+    .eq('student_id', user.id)
+    .maybeSingle()
 
   if (submission) redirect(`/dashboard/quizzes/${id}/result`)
+
+  // ✅ Gate: เช็ค blocked ก่อนแสดงหน้า terms
+  const { data: session } = await supabase
+    .from('quiz_sessions')
+    .select('status, leave_count')
+    .eq('quiz_id', id)
+    .eq('student_id', user.id)
+    .maybeSingle()
+
+  const isBlocked =
+    session?.status === 'blocked' ||
+    (session?.leave_count ?? 0) >= 3
+
+  if (isBlocked) redirect('/dashboard/quizzes')
 
   const qCount = (quiz.questions as { count: number }[])?.[0]?.count ?? 0
 

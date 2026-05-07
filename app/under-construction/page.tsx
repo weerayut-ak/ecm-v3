@@ -124,7 +124,6 @@ export default function UnderConstruction() {
             หน้านี้อยู่ระหว่างการพัฒนา<br />จะพร้อมใช้งานเร็วๆ นี้ครับ
           </p>
 
-
           <p style={{ fontSize:12, color:'var(--outline)', margin:'8px 0 28px', fontWeight:500, minHeight:18 }}>
             กำลังสร้าง{'.'.repeat(dots)}
           </p>

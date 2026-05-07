@@ -576,7 +576,6 @@ export default function MediaClient({
 
       {/* ── Page Header ── */}
       <div className="mc-page-header fade-up">
-        <p className="mc-page-label">Resource Center</p>
         <h1 className="mc-page-title">สื่อการเรียนรู้</h1>
         <p className="mc-page-desc">
           คลังบทความ วิดีโอ และสื่อการสอนภาษาอังกฤษ ครบครัน พร้อมใช้งาน

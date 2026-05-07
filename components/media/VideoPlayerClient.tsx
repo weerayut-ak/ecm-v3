@@ -446,7 +446,7 @@ export default function VideoPlayerClient({
             <div className="vp-quiz-bg" /><div className="vp-quiz-bg2" />
             <div style={{ position: 'relative', zIndex: 1 }}>
               <h5 className="vp-quiz-title">ทดสอบความเข้าใจ?</h5>
-              <p className="vp-quiz-desc">ทำควิซเพื่อรับ 50 คะแนนความสำเร็จ และปลดล็อกเหรียญตรา 'Grammar King'</p>
+              <p className="vp-quiz-desc"></p>
               <Link href="/dashboard/quizzes" className="vp-quiz-btn">เริ่มทำควิซ</Link>
             </div>
           </div>

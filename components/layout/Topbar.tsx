@@ -18,7 +18,7 @@ const ADMIN_NAV = [
   { href: '/dashboard/students', label: 'นักเรียน', icon: Users },
   { href: '/dashboard/admin', label: 'Admin Panel', icon: Settings },
   { href: '/dashboard/admin/submissions', label: 'ประวัติสอบ', icon: BarChart2 },
-  { href: '/under-construction', label: 'OMR Scanner', icon: Scan },
+  { href: '/dashboard/omr', label: 'OMR Scanner', icon: Scan },
 ]
 
 export default function Topbar({

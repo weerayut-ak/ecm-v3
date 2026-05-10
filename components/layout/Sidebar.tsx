@@ -1,28 +1,29 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Users, BookOpen, Megaphone, ClipboardList, Settings, LogOut, BarChart2, User, MessageCircle } from 'lucide-react'
+import { LayoutDashboard, Users, BookOpen, Megaphone, ClipboardList, Settings, LogOut, BarChart2, User, MessageCircle, ScanLine } from 'lucide-react'
 
 interface Profile { id: string; full_name: string; nickname?: string | null; role: string; grade?: string | null }
 
 const NAV = [
-  { href: '/dashboard',               label: 'หน้าหลัก',   icon: LayoutDashboard },
+  { href: '/dashboard',               label: 'หน้าหลัก',    icon: LayoutDashboard },
   { href: '/dashboard/media',         label: 'สื่อการเรียน', icon: BookOpen },
-  { href: '/dashboard/announcements', label: 'ประกาศ',      icon: Megaphone },
-  { href: '/dashboard/quizzes',       label: 'ควิซ',        icon: ClipboardList },
-  { href: '/dashboard/profile',       label: 'โปรไฟล์',    icon: User },
+  { href: '/dashboard/announcements', label: 'ประกาศ',       icon: Megaphone },
+  { href: '/dashboard/quizzes',       label: 'ควิซ',         icon: ClipboardList },
+  { href: '/dashboard/profile',       label: 'โปรไฟล์',     icon: User },
 ]
+
 const ADMIN_NAV = [
-  { href: '/dashboard/students',          label: 'นักเรียน',   icon: Users },
-  { href: '/dashboard/admin',             label: 'Admin Panel', icon: Settings },
-  { href: '/dashboard/admin/submissions', label: 'ประวัติสอบ',  icon: BarChart2 },
+  { href: '/dashboard/students',          label: 'นักเรียน',     icon: Users },
+  { href: '/dashboard/admin',             label: 'Admin Panel',  icon: Settings },
+  { href: '/dashboard/admin/submissions', label: 'ประวัติสอบ',   icon: BarChart2 },
+  { href: '/dashboard/omr',              label: 'OMR สแกน',     icon: ScanLine },  // ← แก้แล้ว
 ]
 
 export default function Sidebar({ profile }: { profile: Profile | null }) {
   const pathname = usePathname()
-  const isAdmin = profile?.role === 'admin'
-  const name = profile?.nickname ?? profile?.full_name ?? 'Guest'
-  const initial = name[0]?.toUpperCase() ?? 'G'
+  const isAdmin  = profile?.role === 'admin'
+  const name     = profile?.nickname ?? profile?.full_name ?? 'Guest'
 
   async function logout() {
     const { createClient } = await import('@/lib/supabase/client')
@@ -30,7 +31,8 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
     window.location.href = '/login'
   }
 
-  const isActive = (href: string) => href === '/dashboard' ? pathname === href : pathname.startsWith(href)
+  const isActive = (href: string) =>
+    href === '/dashboard' ? pathname === href : pathname.startsWith(href)
 
   return (
     <aside style={{
@@ -44,6 +46,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
       flexShrink: 0, height: '100%',
       padding: '24px 16px',
     }}>
+
       {/* Brand */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '4px 8px', marginBottom: 32 }}>
         <div style={{
@@ -63,15 +66,12 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
       {/* Nav */}
       <nav style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div className="section-label" style={{ marginBottom: 8 }}>เมนูหลัก</div>
-        {NAV.map(({ href, label, icon: Icon }) => {
-          const active = isActive(href)
-          return (
-            <Link key={href} href={href} className={`nav-item ${active ? 'active' : ''}`}>
-              <Icon size={18} style={{ flexShrink: 0 }} />
-              <span>{label}</span>
-            </Link>
-          )
-        })}
+        {NAV.map(({ href, label, icon: Icon }) => (
+          <Link key={href} href={href} className={`nav-item ${isActive(href) ? 'active' : ''}`}>
+            <Icon size={18} style={{ flexShrink: 0 }} />
+            <span>{label}</span>
+          </Link>
+        ))}
 
         {isAdmin && (
           <>
@@ -86,7 +86,7 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
         )}
       </nav>
 
-      {/* CTA Button */}
+      {/* CTA + Logout */}
       <div style={{ marginTop: 16 }}>
         <a href="https://www.facebook.com/love.esthers" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none', display: 'block' }}>
           <button style={{
@@ -96,18 +96,17 @@ export default function Sidebar({ profile }: { profile: Profile | null }) {
             border: 'none', cursor: 'pointer',
             boxShadow: '0 10px 30px rgba(0,80,203,0.2)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-            transition: 'all 0.2s ease',
-            fontFamily: 'var(--font)',
+            transition: 'all 0.2s ease', fontFamily: 'var(--font)',
           }}
             onMouseEnter={e => (e.currentTarget.style.boxShadow = '0 15px 40px rgba(0,80,203,0.3)')}
             onMouseLeave={e => (e.currentTarget.style.boxShadow = '0 10px 30px rgba(0,80,203,0.2)')}
           >
-            <MessageCircle size={16} />
-            ติดต่อผู้สอน
+            <MessageCircle size={16} /> ติดต่อผู้สอน
           </button>
         </a>
 
-        <button onClick={logout} className="nav-item btn-ghost" style={{ width: '100%', marginTop: 8, fontSize: 13, color: 'var(--outline)', justifyContent: 'center' }}>
+        <button onClick={logout} className="nav-item btn-ghost"
+          style={{ width: '100%', marginTop: 8, fontSize: 13, color: 'var(--outline)', justifyContent: 'center' }}>
           <LogOut size={15} /><span>ออกจากระบบ</span>
         </button>
       </div>

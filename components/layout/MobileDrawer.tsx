@@ -1,10 +1,11 @@
 'use client'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react' // [1] เพิ่ม useState
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, BookOpen, Megaphone, ClipboardList,
   Users, Settings, BarChart2, User, LogOut, X, Sparkles, MessageCircle,
+  ChevronDown, Scan // [2] เพิ่ม Icon สำหรับ Dropdown และ OMR Scanner
 } from 'lucide-react'
 
 interface Profile { id: string; full_name: string; nickname?: string | null; role: string; grade?: string | null }
@@ -12,14 +13,17 @@ interface Profile { id: string; full_name: string; nickname?: string | null; rol
 const NAV = [
   { href: '/dashboard',               label: 'หน้าหลัก',    icon: LayoutDashboard },
   { href: '/dashboard/media',         label: 'สื่อการเรียน', icon: BookOpen },
-  { href: '/dashboard/announcements', label: 'ประกาศ',       icon: Megaphone },
-  { href: '/dashboard/quizzes',       label: 'ควิซ',         icon: ClipboardList },
-  { href: '/dashboard/profile',       label: 'โปรไฟล์',     icon: User },
+  { href: '/dashboard/announcements', label: 'ประกาศ',      icon: Megaphone },
+  { href: '/dashboard/quizzes',       label: 'ควิซ',        icon: ClipboardList },
+  { href: '/dashboard/profile',       label: 'โปรไฟล์',    icon: User },
 ]
+
+// [3] อัปเดต ADMIN_NAV เพิ่ม OMR Scanner
 const ADMIN_NAV = [
-  { href: '/dashboard/students',          label: 'นักเรียน',   icon: Users },
+  { href: '/dashboard/students',          label: 'นักเรียน',    icon: Users },
   { href: '/dashboard/admin',             label: 'Admin Panel', icon: Settings },
   { href: '/dashboard/admin/submissions', label: 'ประวัติสอบ',  icon: BarChart2 },
+  { href: '/under-construction',          label: 'OMR Scanner', icon: Scan },
 ]
 
 interface Props {
@@ -33,6 +37,9 @@ export default function MobileDrawer({ profile, open, onClose }: Props) {
   const isAdmin = profile?.role === 'admin'
   const name = profile?.nickname ?? profile?.full_name ?? 'Guest'
   const initial = name[0]?.toUpperCase() ?? 'G'
+
+  // [4] State ควบคุม Dropdown หมวดจัดการ (ตั้งให้กางเป็นค่าเริ่มต้น)
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(true)
 
   // Close on route change
   useEffect(() => { onClose() }, [pathname])
@@ -154,7 +161,7 @@ export default function MobileDrawer({ profile, open, onClose }: Props) {
           {NAV.map(({ href, label, icon: Icon }) => {
             const active = isActive(href)
             return (
-              <Link key={href} href={href} style={{
+              <Link key={href} href={href} onClick={onClose} style={{
                 display: 'flex', alignItems: 'center', gap: 12,
                 padding: '12px 14px', borderRadius: 14,
                 textDecoration: 'none',
@@ -172,25 +179,56 @@ export default function MobileDrawer({ profile, open, onClose }: Props) {
 
           {isAdmin && (
             <>
-              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--outline)', padding: '16px 8px 6px' }}>จัดการ</div>
-              {ADMIN_NAV.map(({ href, label, icon: Icon }) => {
-                const active = isActive(href)
-                return (
-                  <Link key={href} href={href} style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '12px 14px', borderRadius: 14,
-                    textDecoration: 'none',
-                    fontWeight: 600, fontSize: 14,
-                    color: active ? 'var(--primary)' : 'var(--on-surface-variant)',
-                    background: active ? 'rgba(0,80,203,0.1)' : 'transparent',
-                    border: active ? '1px solid rgba(0,80,203,0.15)' : '1px solid transparent',
-                    transition: 'all 0.18s',
-                  }}>
-                    <Icon size={18} strokeWidth={active ? 2.5 : 1.8} style={{ flexShrink: 0 }} />
-                    {label}
-                  </Link>
-                )
-              })}
+              {/* [5] ปุ่มสำหรับสลับเปิด/ปิด Dropdown หมวดจัดการ */}
+              <button 
+                onClick={() => setIsAdminMenuOpen(!isAdminMenuOpen)}
+                style={{ 
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+                  width: '100%', background: 'transparent', border: 'none', 
+                  padding: '16px 8px 6px', cursor: 'pointer', outline: 'none'
+                }}
+              >
+                <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--outline)' }}>
+                  จัดการ
+                </span>
+                <ChevronDown 
+                  size={14} 
+                  color="var(--outline)"
+                  style={{ 
+                    transform: isAdminMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)', 
+                    transition: 'transform 0.3s ease' 
+                  }} 
+                />
+              </button>
+
+              {/* [6] คอนเทนเนอร์แสดงเมนูย่อย (มี Animation รูดขึ้น/ลง) */}
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 3,
+                overflow: 'hidden',
+                maxHeight: isAdminMenuOpen ? '300px' : '0px',
+                opacity: isAdminMenuOpen ? 1 : 0,
+                transition: 'all 0.3s cubic-bezier(0.25, 1, 0.5, 1)',
+                marginTop: isAdminMenuOpen ? 4 : 0,
+              }}>
+                {ADMIN_NAV.map(({ href, label, icon: Icon }) => {
+                  const active = isActive(href)
+                  return (
+                    <Link key={href} href={href} onClick={onClose} style={{
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '12px 14px', borderRadius: 14,
+                      textDecoration: 'none',
+                      fontWeight: 600, fontSize: 14,
+                      color: active ? 'var(--primary)' : 'var(--on-surface-variant)',
+                      background: active ? 'rgba(0,80,203,0.1)' : 'transparent',
+                      border: active ? '1px solid rgba(0,80,203,0.15)' : '1px solid transparent',
+                      transition: 'all 0.18s',
+                    }}>
+                      <Icon size={18} strokeWidth={active ? 2.5 : 1.8} style={{ flexShrink: 0 }} />
+                      {label}
+                    </Link>
+                  )
+                })}
+              </div>
             </>
           )}
         </nav>

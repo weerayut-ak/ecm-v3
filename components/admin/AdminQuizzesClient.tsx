@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react"
 import { createPortal } from "react-dom"
 import { createClient } from "@/lib/supabase/client"
+import { useRouter } from "next/navigation"
 import { Plus, X, Clock, ToggleLeft, ToggleRight, Edit2, Trash2, Users, AlertTriangle, RefreshCw, ChevronDown, ChevronUp } from "lucide-react"
 import toast from "react-hot-toast"
 import type { Quiz, Question, QuizOption } from "@/types/quiz"
@@ -20,8 +21,10 @@ interface Session {
 }
 
 export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow[] }) {
+  const router = useRouter()
   const [quizzes, setQuizzes] = useState(init)
-  const [modal, setModal] = useState<{ mode: "add" | "edit"; quiz?: QuizRow } | null>(null)
+  // ตัดโหมด add ออก เหลือแค่เก็บข้อมูล quiz สำหรับแก้ไข
+  const [modal, setModal] = useState<{ quiz: QuizRow } | null>(null)
   const [qModal, setQModal] = useState<{ quizId: string; quizTitle: string } | null>(null)
   const [violationsModal, setViolationsModal] = useState<{ quizId: string; quizTitle: string } | null>(null)
   const supabase = createClient()
@@ -40,8 +43,8 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
   }
 
   async function onSaved(quiz: QuizRow) {
-    if (modal?.mode === "add") setQuizzes(p => [quiz, ...p])
-    else setQuizzes(p => p.map(q => q.id === quiz.id ? quiz : q))
+    // อัปเดตข้อมูลแบบทดสอบใน State
+    setQuizzes(p => p.map(q => q.id === quiz.id ? quiz : q))
     setModal(null)
     toast.success("บันทึกแล้ว ✓")
   }
@@ -53,7 +56,8 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
           <h1 style={{ fontSize: 17, fontWeight: 700 }}>จัดการแบบทดสอบ</h1>
           <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 2 }}>{quizzes.length} ชุด</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal({ mode: "add" })}>
+        {/* เปลี่ยนปุ่มให้ Push ไปหน้า Add แทนการเปิด Modal */}
+        <button className="btn btn-primary" onClick={() => router.push('/dashboard/admin/quizzes/add')}>
           <Plus size={14} /> สร้างแบบทดสอบ
         </button>
       </div>
@@ -85,7 +89,7 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
                 <button className="btn btn-sm" onClick={() => setViolationsModal({ quizId: q.id, quizTitle: q.title })} style={{ color: 'var(--amber)' }}>
                   <AlertTriangle size={12} /> ออกกลางคัน
                 </button>
-                <button className="btn btn-sm" onClick={() => setModal({ mode: "edit", quiz: q })}>แก้ไข</button>
+                <button className="btn btn-sm" onClick={() => setModal({ quiz: q })}>แก้ไข</button>
                 <button className="btn btn-sm btn-danger" onClick={() => deleteQuiz(q.id)}><Trash2 size={12} /></button>
               </div>
             </div>
@@ -93,7 +97,7 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
         ))}
       </div>
 
-      {modal && <QuizFormModal mode={modal.mode} quiz={modal.quiz} onClose={() => setModal(null)} onSaved={onSaved} />}
+      {modal && <QuizFormModal quiz={modal.quiz} onClose={() => setModal(null)} onSaved={onSaved} />}
       {qModal && <QuestionManagerModal quizId={qModal.quizId} quizTitle={qModal.quizTitle} onClose={() => setQModal(null)} />}
       {violationsModal && <ViolationsModal quizId={violationsModal.quizId} quizTitle={violationsModal.quizTitle} onClose={() => setViolationsModal(null)} />}
     </div>
@@ -282,14 +286,14 @@ function SessionRow({ session, onReset, resetting }: { session: Session; onReset
   )
 }
 
-function QuizFormModal({ mode, quiz, onClose, onSaved }: { mode: "add" | "edit"; quiz?: QuizRow; onClose: () => void; onSaved: (q: QuizRow) => void }) {
+function QuizFormModal({ quiz, onClose, onSaved }: { quiz: QuizRow; onClose: () => void; onSaved: (q: QuizRow) => void }) {
   const [form, setForm] = useState({
-    title: quiz?.title ?? "", description: quiz?.description ?? "",
-    pass_score: quiz?.pass_score ?? 60,
-    time_limit: quiz?.time_limit ?? "" as number | string,
-    is_open: quiz?.is_open ?? false,
-    opens_at: quiz?.opens_at ? quiz.opens_at.slice(0, 16) : "",
-    closes_at: quiz?.closes_at ? quiz.closes_at.slice(0, 16) : "",
+    title: quiz.title ?? "", description: quiz.description ?? "",
+    pass_score: quiz.pass_score ?? 60,
+    time_limit: quiz.time_limit ?? "" as number | string,
+    is_open: quiz.is_open ?? false,
+    opens_at: quiz.opens_at ? quiz.opens_at.slice(0, 16) : "",
+    closes_at: quiz.closes_at ? quiz.closes_at.slice(0, 16) : "",
   })
   const [saving, setSaving] = useState(false)
   const supabase = createClient()
@@ -297,21 +301,15 @@ function QuizFormModal({ mode, quiz, onClose, onSaved }: { mode: "add" | "edit";
   async function save() {
     if (!form.title.trim()) { toast.error("กรุณาใส่ชื่อ"); return }
     setSaving(true)
-    const { data: { user } } = await supabase.auth.getUser()
     const payload = {
       title: form.title, description: form.description || null,
       pass_score: Number(form.pass_score),
       time_limit: form.time_limit ? Number(form.time_limit) : null,
       is_open: form.is_open,
       opens_at: form.opens_at || null, closes_at: form.closes_at || null,
-      created_by: user?.id,
     }
-    let data, error
-    if (mode === "add") {
-      ;({ data, error } = await supabase.from("quizzes").insert(payload).select("*, questions(count)").single())
-    } else {
-      ;({ data, error } = await supabase.from("quizzes").update(payload).eq("id", quiz!.id).select("*, questions(count)").single())
-    }
+    
+    const { data, error } = await supabase.from("quizzes").update(payload).eq("id", quiz.id).select("*, questions(count)").single()
     if (error || !data) { toast.error("บันทึกไม่สำเร็จ"); setSaving(false); return }
     onSaved(data); setSaving(false)
   }
@@ -321,7 +319,7 @@ function QuizFormModal({ mode, quiz, onClose, onSaved }: { mode: "add" | "edit";
       onClick={e => e.target === e.currentTarget && onClose()}>
       <div style={{ background: "var(--surface)", borderRadius: 20, width: "100%", maxWidth: 520, display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.2)", margin: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 16px", borderBottom: "1px solid var(--border)" }}>
-          <h3 style={{ fontWeight: 700, fontSize: 16 }}>{mode === "add" ? "สร้างแบบทดสอบ" : "แก้ไขแบบทดสอบ"}</h3>
+          <h3 style={{ fontWeight: 700, fontSize: 16 }}>แก้ไขแบบทดสอบ</h3>
           <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
         </div>
         <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: 14 }}>

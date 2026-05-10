@@ -475,7 +475,7 @@ const DEMO_Q:Question[] = Array.from({length:200},(_,i)=>({
 }))
 
 // ─── App ──────────────────────────────────────────────────────────────────────
-export default function App() {
+export default function OMRSheetGenerator({ onClose }: { onClose?: () => void }) {
   const [copies,setCopies]       = useState(3)
   const [showAK,setShowAK]       = useState(false)
   const [quizTitle,setQuizTitle] = useState(DEMO_QUIZ.title)
@@ -623,6 +623,15 @@ export default function App() {
         display:'flex',flexWrap:'wrap',gap:7,alignItems:'center',
         boxShadow:'0 2px 10px rgba(107,33,168,0.1)' }}>
 
+        {onClose && (
+          <button onClick={onClose} style={{
+            display:'flex', alignItems:'center', gap:5,
+            padding:'6px 12px', borderRadius:8, border:'none',
+            background:'rgba(107,33,168,0.1)', color:'#6b21a8',
+            fontWeight:700, fontSize:12, cursor:'pointer',
+            flexShrink:0,
+          }}>← ย้อนกลับ</button>
+        )}
         <div style={{display:'flex',alignItems:'center',gap:7}}>
           <div style={{width:28,height:28,borderRadius:7,background:'#6b21a8',
             display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}>📋</div>

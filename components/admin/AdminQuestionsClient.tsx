@@ -20,10 +20,10 @@ const LABEL_MAP: Record<QuestionType, string> = {
   essay: "อัตนัย",
 }
 
-const TYPE_COLOR: Record<QuestionType, { bg: string; color: string }> = {
-  mcq: { bg: "var(--blue-light)", color: "var(--blue)" },
-  fill: { bg: "var(--green-light)", color: "var(--green)" },
-  essay: { bg: "var(--amber-light)", color: "var(--amber)" },
+const TYPE_STYLE: Record<QuestionType, { bg: string; text: string; border: string }> = {
+  mcq:   { bg: "bg-blue-50",   text: "text-blue-600",  border: "border-blue-300" },
+  fill:  { bg: "bg-green-50",  text: "text-green-600", border: "border-green-300" },
+  essay: { bg: "bg-amber-50",  text: "text-amber-600", border: "border-amber-300" },
 }
 
 const EMPTY_OPTIONS = [
@@ -41,34 +41,31 @@ export default function AdminQuestionsClient({
   const router = useRouter()
   const supabase = createClient()
 
-  const [questions, setQuestions] = useState<Question[]>(initialQuestions)
-  const [mode, setMode] = useState<"single" | "bulk">("single")
+  const [questions, setQuestions]     = useState<Question[]>(initialQuestions)
+  const [mode, setMode]               = useState<"single" | "bulk">("single")
+  const [formOpen, setFormOpen]       = useState(false) // mobile drawer toggle
 
-  // ── Form state (shared for add & edit) ──
+  // ── Form state ──
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null)
-  const [type, setType] = useState<QuestionType>("mcq")
-  const [questionText, setQuestionText] = useState("")
-  const [options, setOptions] = useState(EMPTY_OPTIONS)
-  const [correctIndex, setCorrectIndex] = useState(0)
-  const [fillAnswer, setFillAnswer] = useState("")
-  const [points, setPoints] = useState(1)
-  const [saving, setSaving] = useState(false)
+  const [type, setType]                       = useState<QuestionType>("mcq")
+  const [questionText, setQuestionText]       = useState("")
+  const [options, setOptions]                 = useState(EMPTY_OPTIONS)
+  const [correctIndex, setCorrectIndex]       = useState(0)
+  const [fillAnswer, setFillAnswer]           = useState("")
+  const [points, setPoints]                   = useState(1)
+  const [saving, setSaving]                   = useState(false)
 
   // ── Bulk state ──
-  const [bulkText, setBulkText] = useState("")
+  const [bulkText, setBulkText]       = useState("")
   const [bulkImporting, setBulkImporting] = useState(false)
 
   function resetForm() {
-    setQuestionText("")
-    setOptions(EMPTY_OPTIONS)
-    setCorrectIndex(0)
-    setFillAnswer("")
-    setPoints(1)
+    setQuestionText(""); setOptions(EMPTY_OPTIONS)
+    setCorrectIndex(0); setFillAnswer(""); setPoints(1)
   }
 
   function cancelEdit() {
-    setEditingQuestion(null)
-    resetForm()
+    setEditingQuestion(null); resetForm(); setFormOpen(false)
   }
 
   function loadForEdit(q: Question) {
@@ -76,20 +73,16 @@ export default function AdminQuestionsClient({
     setEditingQuestion(q)
     setType(q.type as QuestionType)
     setQuestionText(q.question_text)
-    setOptions(
-      q.type === "mcq" && q.options
-        ? (q.options as QuizOption[])
-        : EMPTY_OPTIONS
-    )
+    setOptions(q.type === "mcq" && q.options ? (q.options as QuizOption[]) : EMPTY_OPTIONS)
     setCorrectIndex(q.type === "mcq" ? Number(q.correct_answer ?? 0) : 0)
     setFillAnswer(q.type === "fill" ? (q.correct_answer ?? "") : "")
     setPoints(q.points ?? 1)
+    setFormOpen(true)
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
-  // ── Parse bulk MCQ ──
   function parseBulkMCQ(text: string): Partial<Question>[] {
-    const blocks = text.trim().split(/\n{2,}/).filter(b => b.trim())
+    const blocks = text.trim().split(/\n{2,}/).filter(Boolean)
     return blocks.map((block, i) => {
       const lines = block.split("\n").map(l => l.trim()).filter(Boolean)
       const question_text = lines[0].replace(/^\d+\.\s*/, "")
@@ -103,78 +96,49 @@ export default function AdminQuestionsClient({
           if (line.includes("*")) correct_answer = String(idx)
         }
       })
-      return {
-        type: "mcq" as const,
-        question_text,
-        options: opts,
-        correct_answer,
-        sort_order: questions.length + i,
-        quiz_id: quizId,
-        points: 1,
-      }
+      return { type: "mcq" as const, question_text, options: opts, correct_answer, sort_order: questions.length + i, quiz_id: quizId, points: 1 }
     }).filter(q => q.question_text && (q.options as QuizOption[])?.length > 0)
   }
 
   const parsedBulk = parseBulkMCQ(bulkText)
 
-  // ── Save (add or update) ──
   async function handleSave(andContinue = false) {
     if (!questionText.trim()) { toast.error("กรุณาใส่คำถาม"); return }
     if (type === "mcq" && options.some(o => !o.text.trim())) { toast.error("กรุณาใส่ตัวเลือกให้ครบ"); return }
     setSaving(true)
-
     const payload: Partial<Question> = {
-      quiz_id: quizId,
-      type,
-      question_text: questionText,
+      quiz_id: quizId, type, question_text: questionText,
       options: type === "mcq" ? options : null,
-      correct_answer:
-        type === "mcq" ? String(correctIndex)
-        : type === "fill" ? fillAnswer
-        : null,
+      correct_answer: type === "mcq" ? String(correctIndex) : type === "fill" ? fillAnswer : null,
       points,
     }
-
     if (editingQuestion) {
-      // ── UPDATE ──
-      const { data, error } = await supabase
-        .from("questions")
-        .update(payload)
-        .eq("id", editingQuestion.id)
-        .select()
-        .single()
-      if (error || !data) { toast.error("แก้ไขไม่สำเร็จ: " + error?.message); setSaving(false); return }
+      const { data, error } = await supabase.from("questions").update(payload).eq("id", editingQuestion.id).select().single()
+      if (error || !data) { toast.error("แก้ไขไม่สำเร็จ"); setSaving(false); return }
       setQuestions(p => p.map(q => q.id === data.id ? data : q))
       toast.success("แก้ไขข้อสอบแล้ว ✓")
       cancelEdit()
     } else {
-      // ── INSERT ──
-      const { data, error } = await supabase
-        .from("questions")
-        .insert({ ...payload, sort_order: questions.length })
-        .select()
-        .single()
-      if (error || !data) { toast.error("เพิ่มไม่สำเร็จ: " + error?.message); setSaving(false); return }
+      const { data, error } = await supabase.from("questions").insert({ ...payload, sort_order: questions.length }).select().single()
+      if (error || !data) { toast.error("เพิ่มไม่สำเร็จ"); setSaving(false); return }
       setQuestions(p => [...p, data])
       toast.success("เพิ่มข้อสอบแล้ว ✓")
       if (andContinue) resetForm()
+      else setFormOpen(false)
     }
     setSaving(false)
   }
 
-  // ── Import bulk ──
   async function importBulk() {
     if (!parsedBulk.length) { toast.error("ไม่พบข้อสอบที่ถูกรูปแบบ"); return }
     setBulkImporting(true)
     const { data, error } = await supabase.from("questions").insert(parsedBulk).select()
-    if (error) { toast.error("นำเข้าไม่สำเร็จ: " + error.message); setBulkImporting(false); return }
+    if (error) { toast.error("นำเข้าไม่สำเร็จ"); setBulkImporting(false); return }
     setQuestions(p => [...p, ...(data ?? [])])
-    setBulkText("")
-    setBulkImporting(false)
+    setBulkText(""); setBulkImporting(false); setFormOpen(false)
     toast.success(`นำเข้า ${data?.length} ข้อ ✓`)
   }
 
-  // ── Delete question ──
   async function deleteQ(id: string) {
     if (!confirm("ลบข้อนี้?")) return
     await supabase.from("questions").delete().eq("id", id)
@@ -183,317 +147,111 @@ export default function AdminQuestionsClient({
     toast.success("ลบแล้ว")
   }
 
-  const typeCounts = questions.reduce(
-    (acc, q) => { acc[q.type as QuestionType] = (acc[q.type as QuestionType] ?? 0) + 1; return acc },
-    {} as Record<QuestionType, number>
-  )
+  const typeCounts = questions.reduce((acc, q) => {
+    acc[q.type as QuestionType] = (acc[q.type as QuestionType] ?? 0) + 1; return acc
+  }, {} as Record<QuestionType, number>)
 
   const isEditing = !!editingQuestion
 
+  const formProps = {
+    isEditing, editingQuestion, questions, mode, setMode,
+    type, setType, questionText, setQuestionText,
+    options, setOptions, correctIndex, setCorrectIndex,
+    fillAnswer, setFillAnswer, points, setPoints, saving,
+    bulkText, setBulkText, parsedBulk, bulkImporting,
+    onSave: handleSave, onImportBulk: importBulk, onCancel: cancelEdit,
+  }
+
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+    <div className="max-w-[1200px] mx-auto px-3 sm:px-4 py-4">
 
       {/* ── Header ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+      <div className="flex items-center gap-2 mb-4">
         <button
-          className="btn btn-sm btn-ghost"
+          className="btn btn-sm btn-ghost flex items-center gap-1 rounded shrink-0"
           onClick={() => router.push("/dashboard/admin/quizzes")}
-          style={{ display: "flex", alignItems: "center", gap: 5 }}
         >
-          <ArrowLeft size={13} /> กลับ
+          <ArrowLeft size={13} />
+          <span className="hidden sm:inline">กลับ</span>
         </button>
-        <div style={{ flex: 1 }}>
-          <h1 style={{ fontSize: 17, fontWeight: 700 }}>จัดการข้อสอบ</h1>
-          <p style={{ fontSize: 12, color: "var(--text-3)", marginTop: 1 }}>
-            {quizTitle} · {questions.length} ข้อ
-          </p>
+        <div className="flex-1 min-w-0">
+          <h1 className="text-base font-bold truncate">จัดการข้อสอบ</h1>
+          <p className="text-[11px] mt-0.5 truncate text-gray-400">{quizTitle} · {questions.length} ข้อ</p>
         </div>
+        {/* Mobile FAB-style add button */}
         <button
-          className="btn btn-sm"
-          style={{ color: "var(--blue)", display: "flex", alignItems: "center", gap: 5 }}
+          className="btn btn-sm btn-primary flex items-center gap-1 rounded lg:hidden"
+          onClick={() => { setEditingQuestion(null); resetForm(); setFormOpen(p => !p) }}
+        >
+          <Plus size={13} />
+          <span className="hidden xs:inline">เพิ่ม</span>
+        </button>
+        <button
+          className="btn btn-sm flex items-center gap-1 rounded text-blue-600"
           onClick={() => router.push(`/dashboard/admin/quizzes/${quizId}/preview`)}
         >
-          <Eye size={13} /> พรีวิว
+          <Eye size={13} />
+          <span className="hidden sm:inline">พรีวิว</span>
         </button>
       </div>
 
       {/* ── Summary chips ── */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
-        {(["mcq", "fill", "essay"] as QuestionType[]).map(t => (
-          <div key={t} style={{
-            padding: "4px 10px", borderRadius: 3,
-            background: TYPE_COLOR[t].bg,
-            color: TYPE_COLOR[t].color,
-            fontSize: 12, fontWeight: 600,
-            border: "1px solid currentColor",
-            opacity: 0.85,
-          }}>
-            {LABEL_MAP[t]} {typeCounts[t] ?? 0} ข้อ
-          </div>
-        ))}
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {(["mcq", "fill", "essay"] as QuestionType[]).map(t => {
+          const s = TYPE_STYLE[t]
+          return (
+            <span key={t} className={`text-[11px] font-semibold px-2.5 py-0.5 rounded border ${s.bg} ${s.text} ${s.border}`}>
+              {LABEL_MAP[t]} {typeCounts[t] ?? 0} ข้อ
+            </span>
+          )
+        })}
       </div>
 
-      {/* ── Split Layout ── */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "380px 1fr",
-        gap: 20,
-        alignItems: "start",
-      }}>
+      {/* ── Mobile: collapsible form panel ── */}
+      {(formOpen || isEditing) && (
+        <div className="lg:hidden mb-4 border rounded overflow-hidden" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+          <div className="flex items-center justify-between px-4 py-2.5 border-b" style={{ borderColor: "var(--border)" }}>
+            <p className="text-sm font-bold">{isEditing ? "✏️ แก้ไขข้อสอบ" : "เพิ่มข้อสอบ"}</p>
+            <button className="btn btn-icon btn-ghost rounded" onClick={cancelEdit}><X size={14} /></button>
+          </div>
+          <div className="p-4">
+            <FormContent {...formProps} />
+          </div>
+        </div>
+      )}
 
-        {/* ── LEFT: Form ── */}
-        <div style={{ position: "sticky", top: 24 }}>
+      {/* ── Desktop: 2-column layout ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-5 items-start">
 
-          {/* Mode Tabs — hidden while editing */}
+        {/* LEFT: sticky form — desktop only */}
+        <div className="hidden lg:block sticky top-6">
           {!isEditing && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
-              <button
-                className={`btn btn-sm ${mode === "single" ? "btn-primary" : ""}`}
-                style={{ flex: 1, justifyContent: "center", borderRadius: 4 }}
-                onClick={() => setMode("single")}
-              >
+            <div className="flex gap-1.5 mb-3">
+              <button className={`btn btn-sm flex-1 justify-center rounded ${mode === "single" ? "btn-primary" : ""}`} onClick={() => setMode("single")}>
                 <Plus size={12} /> เพิ่มทีละข้อ
               </button>
-              <button
-                className={`btn btn-sm ${mode === "bulk" ? "btn-primary" : ""}`}
-                style={{ flex: 1, justifyContent: "center", borderRadius: 4 }}
-                onClick={() => setMode("bulk")}
-              >
+              <button className={`btn btn-sm flex-1 justify-center rounded ${mode === "bulk" ? "btn-primary" : ""}`} onClick={() => setMode("bulk")}>
                 📋 วางหลายข้อ
               </button>
             </div>
           )}
-
-          {/* ── Single / Edit Form ── */}
-          {(mode === "single" || isEditing) && (
-            <div className="card" style={{ padding: "18px 20px", borderRadius: 6 }}>
-              {/* Form header */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                <div>
-                  <h3 style={{ fontSize: 13, fontWeight: 700 }}>
-                    {isEditing ? "✏️ แก้ไขข้อสอบ" : "เพิ่มข้อสอบใหม่"}
-                  </h3>
-                  {isEditing && (
-                    <p style={{ fontSize: 11, color: "var(--text-3)", marginTop: 2 }}>
-                      ข้อ {questions.findIndex(q => q.id === editingQuestion?.id) + 1}
-                    </p>
-                  )}
-                </div>
-                {isEditing && (
-                  <button className="btn btn-icon btn-ghost" onClick={cancelEdit} title="ยกเลิก" style={{ borderRadius: 4 }}>
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-
-              {/* Type selector */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 5, marginBottom: 12 }}>
-                {(["mcq", "fill", "essay"] as QuestionType[]).map(t => (
-                  <button
-                    key={t}
-                    onClick={() => setType(t)}
-                    className={`btn btn-sm ${type === t ? "btn-primary" : ""}`}
-                    style={{ justifyContent: "center", fontSize: 12, borderRadius: 4 }}
-                  >
-                    {LABEL_MAP[t]}
-                  </button>
-                ))}
-              </div>
-
-              {/* Question text */}
-              <textarea
-                className="input"
-                rows={3}
-                placeholder="คำถาม..."
-                value={questionText}
-                onChange={e => setQuestionText(e.target.value)}
-                style={{ marginBottom: 12, resize: "vertical", borderRadius: 4 }}
-              />
-
-              {/* MCQ options */}
-              {type === "mcq" && (
-                <div style={{ marginBottom: 12 }}>
-                  {options.map((opt, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
-                      <input
-                        type="radio"
-                        name="correct_opt"
-                        checked={correctIndex === i}
-                        onChange={() => setCorrectIndex(i)}
-                        style={{ flexShrink: 0 }}
-                      />
-                      <div style={{
-                        width: 24, height: 24, borderRadius: 3, flexShrink: 0,
-                        background: correctIndex === i ? "var(--green-light)" : "var(--bg-2)",
-                        color: correctIndex === i ? "var(--green)" : "var(--text-2)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 11, fontWeight: 700,
-                        border: "1px solid var(--border)",
-                      }}>
-                        {opt.label}
-                      </div>
-                      <input
-                        className="input"
-                        style={{ fontSize: 13, borderRadius: 4 }}
-                        value={opt.text}
-                        onChange={e => setOptions(p => p.map((o, j) => j === i ? { ...o, text: e.target.value } : o))}
-                        placeholder={`ตัวเลือก ${opt.label}`}
-                      />
-                    </div>
-                  ))}
-                  {correctIndex !== -1 && (
-                    <p style={{ fontSize: 11, color: "var(--green)", marginTop: 4 }}>
-                      ✓ คำตอบที่ถูก: ตัวเลือก {options[correctIndex]?.label}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Fill answer */}
-              {type === "fill" && (
-                <input
-                  className="input"
-                  style={{ marginBottom: 12, borderRadius: 4 }}
-                  placeholder="คำตอบที่ถูกต้อง..."
-                  value={fillAnswer}
-                  onChange={e => setFillAnswer(e.target.value)}
-                />
-              )}
-
-              {/* Essay hint */}
-              {type === "essay" && (
-                <div style={{
-                  padding: "8px 12px", borderRadius: 4, marginBottom: 12,
-                  background: "var(--amber-light)",
-                  fontSize: 11, color: "var(--amber)",
-                  border: "1px solid rgba(217,119,6,0.2)",
-                }}>
-                  อัตนัย: ครูตรวจให้คะแนนเอง ไม่มีคำตอบอัตโนมัติ
-                </div>
-              )}
-
-              {/* Points */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-                <label style={{ fontSize: 12, color: "var(--text-2)", flexShrink: 0 }}>คะแนน:</label>
-                <input
-                  type="number" min={1} className="input"
-                  style={{ width: 70, borderRadius: 4 }}
-                  value={points}
-                  onChange={e => setPoints(Number(e.target.value))}
-                />
-              </div>
-
-              {/* Buttons */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {isEditing ? (
-                  <>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => handleSave(false)}
-                      disabled={saving}
-                      style={{ width: "100%", justifyContent: "center", borderRadius: 4 }}
-                    >
-                      {saving ? <><div className="spinner" />บันทึก...</> : "บันทึกการแก้ไข"}
-                    </button>
-                    <button
-                      className="btn"
-                      style={{ width: "100%", justifyContent: "center", borderRadius: 4 }}
-                      onClick={cancelEdit}
-                    >
-                      ยกเลิก
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      className="btn btn-primary"
-                      onClick={() => handleSave(false)}
-                      disabled={saving}
-                      style={{ width: "100%", justifyContent: "center", borderRadius: 4 }}
-                    >
-                      {saving ? <><div className="spinner" />บันทึก...</> : "บันทึก"}
-                    </button>
-                    <button
-                      className="btn"
-                      style={{ width: "100%", justifyContent: "center", borderRadius: 4, background: "rgba(0,80,203,0.1)", color: "var(--blue)", fontWeight: 700 }}
-                      onClick={() => handleSave(true)}
-                      disabled={saving}
-                    >
-                      <Plus size={11} /> บันทึก & เพิ่มข้อต่อไป
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* ── Bulk Import Form ── */}
-          {mode === "bulk" && !isEditing && (
-            <div className="card" style={{ padding: "18px 20px", borderRadius: 6 }}>
-              <h3 style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>📋 วางข้อสอบปรนัยหลายข้อ</h3>
-              <p style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 10, lineHeight: 1.6 }}>
-                แต่ละข้อคั่นด้วยบรรทัดว่าง ใส่ <strong>*</strong> หลังตัวเลือกที่ถูกต้อง
-              </p>
-              <div style={{
-                padding: "8px 12px", borderRadius: 4, marginBottom: 10,
-                background: "var(--bg-2)", fontSize: 11,
-                fontFamily: "monospace", lineHeight: 1.8, color: "var(--text-2)",
-                border: "1px solid var(--border)",
-              }}>
-                1. คำถามข้อ 1{"\n"}
-                A. ตัวเลือก ก{"\n"}
-                B. ตัวเลือก ข*{"\n"}
-                C. ตัวเลือก ค
-              </div>
-              <textarea
-                className="input"
-                rows={12}
-                value={bulkText}
-                onChange={e => setBulkText(e.target.value)}
-                style={{ fontFamily: "monospace", fontSize: 12, resize: "vertical", marginBottom: 10, borderRadius: 4 }}
-                placeholder={"1. คำถามข้อ 1\nA. ตัวเลือก A\nB. ตัวเลือก B*\nC. ตัวเลือก C\nD. ตัวเลือก D\n\n2. คำถามข้อ 2\n..."}
-              />
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                <p style={{ fontSize: 11, color: parsedBulk.length > 0 ? "var(--green)" : "var(--text-3)" }}>
-                  {parsedBulk.length > 0 ? `✓ ตรวจพบ ${parsedBulk.length} ข้อ` : "ยังไม่มีข้อสอบ"}
-                </p>
-              </div>
-              <button
-                className="btn btn-primary"
-                onClick={importBulk}
-                disabled={!bulkText.trim() || bulkImporting}
-                style={{ width: "100%", justifyContent: "center", borderRadius: 4 }}
-              >
-                {bulkImporting
-                  ? <><div className="spinner" />กำลังนำเข้า...</>
-                  : `นำเข้า ${parsedBulk.length} ข้อ`
-                }
-              </button>
-            </div>
-          )}
+          <FormContent {...formProps} />
         </div>
 
-        {/* ── RIGHT: Questions List ── */}
+        {/* RIGHT: question list */}
         <div>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 700, color: "var(--text-2)" }}>
-              รายการข้อสอบ ({questions.length} ข้อ)
-            </h2>
-          </div>
-
+          <h2 className="text-sm font-bold mb-3 text-gray-500">รายการข้อสอบ ({questions.length} ข้อ)</h2>
           {questions.length === 0 ? (
-            <div className="card" style={{ textAlign: "center", padding: "50px 20px", color: "var(--text-3)", borderRadius: 6 }}>
-              <p style={{ fontSize: 24, marginBottom: 8 }}>📝</p>
-              <p style={{ fontSize: 13 }}>ยังไม่มีข้อสอบ</p>
-              <p style={{ fontSize: 12, marginTop: 4 }}>เพิ่มข้อสอบจากฟอร์มด้านซ้าย</p>
+            <div className="card rounded text-center py-12 px-5 text-gray-400">
+              <p className="text-2xl mb-2">📝</p>
+              <p className="text-sm">ยังไม่มีข้อสอบ</p>
+              <p className="text-xs mt-1">กด <strong>เพิ่ม</strong> เพื่อเริ่มต้น</p>
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div className="flex flex-col gap-1.5">
               {questions.map((q, i) => (
                 <QuestionItem
-                  key={q.id}
-                  question={q}
-                  index={i}
+                  key={q.id} question={q} index={i}
                   isEditing={editingQuestion?.id === q.id}
                   onEdit={() => loadForEdit(q)}
                   onDelete={() => deleteQ(q.id)}
@@ -507,7 +265,207 @@ export default function AdminQuestionsClient({
   )
 }
 
-/* ── Question Item ── */
+/* ──────────────────────────────── Form Content ─────────────────────────── */
+interface FormProps {
+  isEditing: boolean
+  editingQuestion: Question | null
+  questions: Question[]
+  mode: "single" | "bulk"
+  setMode: (m: "single" | "bulk") => void
+  type: QuestionType
+  setType: (t: QuestionType) => void
+  questionText: string
+  setQuestionText: (v: string) => void
+  options: { label: string; text: string }[]
+  setOptions: React.Dispatch<React.SetStateAction<{ label: string; text: string }[]>>
+  correctIndex: number
+  setCorrectIndex: (i: number) => void
+  fillAnswer: string
+  setFillAnswer: (v: string) => void
+  points: number
+  setPoints: (n: number) => void
+  saving: boolean
+  bulkText: string
+  setBulkText: (v: string) => void
+  parsedBulk: Partial<Question>[]
+  bulkImporting: boolean
+  onSave: (andContinue?: boolean) => void
+  onImportBulk: () => void
+  onCancel: () => void
+}
+
+function FormContent(props: FormProps) {
+  const { isEditing, mode } = props
+  if (isEditing || mode === "single") return <SingleForm {...props} />
+  return <BulkForm {...props} />
+}
+
+function SingleForm({
+  isEditing, editingQuestion, questions,
+  type, setType, questionText, setQuestionText,
+  options, setOptions, correctIndex, setCorrectIndex,
+  fillAnswer, setFillAnswer, points, setPoints,
+  saving, onSave, onCancel,
+}: FormProps) {
+  return (
+    <div className="card rounded p-4 flex flex-col gap-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-[13px] font-bold">{isEditing ? "✏️ แก้ไขข้อสอบ" : "เพิ่มข้อสอบใหม่"}</h3>
+          {isEditing && (
+            <p className="text-[11px] text-gray-400 mt-0.5">
+              ข้อ {questions.findIndex(q => q.id === editingQuestion?.id) + 1}
+            </p>
+          )}
+        </div>
+        {isEditing && (
+          <button className="btn btn-icon btn-ghost rounded" onClick={onCancel}><X size={14} /></button>
+        )}
+      </div>
+
+      {/* Type tabs */}
+      <div className="grid grid-cols-3 gap-1.5">
+        {(["mcq", "fill", "essay"] as QuestionType[]).map(t => (
+          <button
+            key={t}
+            onClick={() => setType(t)}
+            className={`btn btn-sm justify-center rounded text-xs ${type === t ? "btn-primary" : ""}`}
+          >
+            {LABEL_MAP[t]}
+          </button>
+        ))}
+      </div>
+
+      {/* Question text */}
+      <textarea
+        className="input rounded resize-y text-sm"
+        rows={3}
+        placeholder="คำถาม..."
+        value={questionText}
+        onChange={e => setQuestionText(e.target.value)}
+      />
+
+      {/* MCQ options */}
+      {type === "mcq" && (
+        <div className="flex flex-col gap-2">
+          {options.map((opt, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                type="radio" name="correct_opt"
+                checked={correctIndex === i}
+                onChange={() => setCorrectIndex(i)}
+                className="shrink-0 accent-blue-600"
+              />
+              <div className={`w-6 h-6 rounded shrink-0 flex items-center justify-center text-[11px] font-bold border
+                ${correctIndex === i ? "bg-green-50 text-green-600 border-green-300" : "bg-gray-100 text-gray-400 border-gray-200"}`}>
+                {opt.label}
+              </div>
+              <input
+                className="input rounded text-sm flex-1 min-w-0"
+                value={opt.text}
+                onChange={e => setOptions(p => p.map((o, j) => j === i ? { ...o, text: e.target.value } : o))}
+                placeholder={`ตัวเลือก ${opt.label}`}
+              />
+            </div>
+          ))}
+          <p className="text-[11px] text-green-600">
+            ✓ คำตอบที่ถูก: ตัวเลือก {options[correctIndex]?.label}
+          </p>
+        </div>
+      )}
+
+      {/* Fill answer */}
+      {type === "fill" && (
+        <input
+          className="input rounded text-sm"
+          placeholder="คำตอบที่ถูกต้อง..."
+          value={fillAnswer}
+          onChange={e => setFillAnswer(e.target.value)}
+        />
+      )}
+
+      {/* Essay hint */}
+      {type === "essay" && (
+        <div className="rounded px-3 py-2 text-[11px] bg-amber-50 text-amber-600 border border-amber-200">
+          อัตนัย: ครูตรวจให้คะแนนเอง ไม่มีคำตอบอัตโนมัติ
+        </div>
+      )}
+
+      {/* Points */}
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-gray-500 shrink-0">คะแนน:</label>
+        <input
+          type="number" min={1}
+          className="input rounded w-16 text-sm"
+          value={points}
+          onChange={e => setPoints(Number(e.target.value))}
+        />
+      </div>
+
+      {/* Action buttons */}
+      <div className="flex flex-col gap-2">
+        {isEditing ? (
+          <>
+            <button className="btn btn-primary w-full justify-center rounded" onClick={() => onSave(false)} disabled={saving}>
+              {saving ? <><div className="spinner" />บันทึก...</> : "บันทึกการแก้ไข"}
+            </button>
+            <button className="btn w-full justify-center rounded" onClick={onCancel}>ยกเลิก</button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-primary w-full justify-center rounded" onClick={() => onSave(false)} disabled={saving}>
+              {saving ? <><div className="spinner" />บันทึก...</> : "บันทึก"}
+            </button>
+            <button
+              className="btn w-full justify-center rounded font-bold bg-blue-50 text-blue-600 hover:bg-blue-100"
+              onClick={() => onSave(true)} disabled={saving}
+            >
+              <Plus size={11} /> บันทึก & เพิ่มข้อต่อไป
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BulkForm({ bulkText, setBulkText, parsedBulk, bulkImporting, onImportBulk }: FormProps) {
+  return (
+    <div className="card rounded p-4 flex flex-col gap-3">
+      <div>
+        <h3 className="text-[13px] font-bold mb-1">📋 วางข้อสอบปรนัยหลายข้อ</h3>
+        <p className="text-[11px] text-gray-400 leading-relaxed">
+          แต่ละข้อคั่นด้วยบรรทัดว่าง ใส่ <strong>*</strong> หลังตัวเลือกที่ถูก
+        </p>
+      </div>
+      <div className="rounded px-3 py-2 text-[11px] font-mono leading-loose bg-gray-100 text-gray-500 border border-gray-200 whitespace-pre">
+        {`1. คำถามข้อ 1\nA. ตัวเลือก ก\nB. ตัวเลือก ข*\nC. ตัวเลือก ค`}
+      </div>
+      <textarea
+        className="input rounded font-mono text-xs resize-y"
+        rows={10}
+        value={bulkText}
+        onChange={e => setBulkText(e.target.value)}
+        placeholder={"1. คำถามข้อ 1\nA. ตัวเลือก A\nB. ตัวเลือก B*\nC. ตัวเลือก C\nD. ตัวเลือก D\n\n2. คำถามข้อ 2\n..."}
+      />
+      <div className="flex items-center justify-between">
+        <p className={`text-[11px] font-semibold ${parsedBulk.length > 0 ? "text-green-600" : "text-gray-400"}`}>
+          {parsedBulk.length > 0 ? `✓ ตรวจพบ ${parsedBulk.length} ข้อ` : "ยังไม่มีข้อสอบ"}
+        </p>
+      </div>
+      <button
+        className="btn btn-primary w-full justify-center rounded"
+        onClick={onImportBulk}
+        disabled={!bulkText.trim() || bulkImporting}
+      >
+        {bulkImporting ? <><div className="spinner" />กำลังนำเข้า...</> : `นำเข้า ${parsedBulk.length} ข้อ`}
+      </button>
+    </div>
+  )
+}
+
+/* ──────────────────────────────── Question Item ─────────────────────────── */
 function QuestionItem({ question: q, index, isEditing, onEdit, onDelete }: {
   question: Question
   index: number
@@ -517,128 +475,55 @@ function QuestionItem({ question: q, index, isEditing, onEdit, onDelete }: {
 }) {
   const [expanded, setExpanded] = useState(false)
   const type = q.type as QuestionType
-  const color = TYPE_COLOR[type] ?? TYPE_COLOR.mcq
+  const s = TYPE_STYLE[type] ?? TYPE_STYLE.mcq
 
   return (
-    <div style={{
-      border: `1.5px solid ${isEditing ? "var(--blue)" : "var(--border)"}`,
-      borderRadius: 6,
-      background: "var(--surface)",
-      overflow: "hidden",
-      boxShadow: isEditing ? "0 0 0 3px rgba(37,99,235,0.08)" : undefined,
-      transition: "box-shadow 0.15s, border-color 0.15s",
-    }}>
-      {/* Header row */}
-      <div
-        style={{
-          display: "flex", alignItems: "flex-start", gap: 10,
-          padding: "11px 14px",
-          cursor: "pointer",
-        }}
-        onClick={() => setExpanded(p => !p)}
-      >
-        {/* Number badge */}
-        <div style={{
-          width: 26, height: 26, borderRadius: 4,
-          background: color.bg, color: color.color,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          fontSize: 12, fontWeight: 700, flexShrink: 0,
-          border: "1px solid currentColor", opacity: 0.85,
-        }}>
+    <div className={`rounded border overflow-hidden transition-all ${isEditing ? "border-blue-500 ring-2 ring-blue-100" : "border-gray-200"}`}
+      style={{ background: "var(--surface)" }}>
+
+      {/* Row */}
+      <div className="flex items-start gap-2.5 px-3 py-2.5 cursor-pointer" onClick={() => setExpanded(p => !p)}>
+        <div className={`w-6 h-6 rounded shrink-0 flex items-center justify-center text-[11px] font-bold border mt-0.5 ${s.bg} ${s.text} ${s.border}`}>
           {index + 1}
         </div>
-
-        {/* Question text */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 13, lineHeight: 1.5, wordBreak: "break-word" }}>
-            {q.question_text}
-          </p>
-          <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{
-              fontSize: 10, padding: "1px 7px", borderRadius: 3,
-              background: color.bg, color: color.color, fontWeight: 600,
-              border: "1px solid currentColor", opacity: 0.85,
-            }}>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] leading-snug break-words">{q.question_text}</p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${s.bg} ${s.text} ${s.border}`}>
               {LABEL_MAP[type]}
             </span>
-            <span style={{ fontSize: 10, color: "var(--text-3)" }}>{q.points} คะแนน</span>
+            <span className="text-[10px] text-gray-400">{q.points} คะแนน</span>
             {isEditing && (
-              <span style={{
-                fontSize: 10, fontWeight: 700, padding: "1px 6px", borderRadius: 3,
-                background: "var(--blue)", color: "#fff",
-              }}>
-                กำลังแก้ไข
-              </span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">กำลังแก้ไข</span>
             )}
           </div>
         </div>
-
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }} onClick={e => e.stopPropagation()}>
-          <button
-            className="btn btn-icon btn-ghost"
-            style={{ width: 28, height: 28, borderRadius: 4 }}
-            onClick={onEdit}
-            title="แก้ไขข้อสอบ"
-          >
-            <Edit2 size={12} />
-          </button>
-          <button
-            className="btn btn-icon btn-ghost"
-            style={{ width: 28, height: 28, borderRadius: 4 }}
-            onClick={() => setExpanded(p => !p)}
-          >
+        <div className="flex gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+          <button className="btn btn-icon btn-ghost w-7 h-7 rounded" onClick={onEdit} title="แก้ไข"><Edit2 size={12} /></button>
+          <button className="btn btn-icon btn-ghost w-7 h-7 rounded" onClick={() => setExpanded(p => !p)}>
             {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
           </button>
-          <button
-            className="btn btn-icon btn-danger"
-            style={{ width: 28, height: 28, borderRadius: 4 }}
-            onClick={onDelete}
-          >
-            <Trash2 size={12} />
-          </button>
+          <button className="btn btn-icon btn-danger w-7 h-7 rounded" onClick={onDelete}><Trash2 size={12} /></button>
         </div>
       </div>
 
-      {/* Expanded: options */}
-      {expanded && q.type === "mcq" && q.options && (
-        <div style={{
-          padding: "0 14px 12px 50px",
-          display: "flex", flexWrap: "wrap", gap: 5,
-          borderTop: "1px solid var(--border)",
-          paddingTop: 10,
-        }}>
-          {(q.options as QuizOption[]).map((opt, oi) => {
+      {/* Expanded */}
+      {expanded && (
+        <div className="px-3 pb-3 pt-2 border-t border-gray-100 flex flex-wrap gap-1.5">
+          {q.type === "mcq" && q.options && (q.options as QuizOption[]).map((opt, oi) => {
             const isCorrect = String(oi) === String(q.correct_answer)
             return (
-              <div key={oi} style={{
-                padding: "3px 10px", borderRadius: 4,
-                background: isCorrect ? "var(--green-light)" : "var(--bg-2)",
-                color: isCorrect ? "var(--green)" : "var(--text-3)",
-                fontWeight: isCorrect ? 700 : 400,
-                fontSize: 12,
-                border: isCorrect ? "1px solid rgba(22,163,74,0.3)" : "1px solid var(--border)",
-              }}>
-                {opt.label}. {opt.text} {isCorrect && "✓"}
+              <div key={oi} className={`text-xs px-2.5 py-1 rounded border ${isCorrect ? "bg-green-50 text-green-700 border-green-300 font-bold" : "bg-gray-50 text-gray-500 border-gray-200"}`}>
+                {opt.label}. {opt.text}{isCorrect && " ✓"}
               </div>
             )
           })}
-        </div>
-      )}
-      {expanded && q.type === "fill" && (
-        <div style={{ padding: "8px 14px 12px 50px", borderTop: "1px solid var(--border)" }}>
-          <span style={{
-            fontSize: 12, padding: "3px 10px", borderRadius: 4,
-            background: "var(--green-light)", color: "var(--green)",
-            fontWeight: 600, border: "1px solid rgba(22,163,74,0.3)",
-          }}>
-            ✓ คำตอบ: {q.correct_answer}
-          </span>
-        </div>
-      )}
-      {expanded && q.type === "essay" && (
-        <div style={{ padding: "8px 14px 12px 50px", borderTop: "1px solid var(--border)" }}>
-          <span style={{ fontSize: 12, color: "var(--text-3)" }}>ตรวจโดยครู</span>
+          {q.type === "fill" && (
+            <span className="text-xs font-semibold px-2.5 py-1 rounded bg-green-50 text-green-700 border border-green-300">
+              ✓ คำตอบ: {q.correct_answer}
+            </span>
+          )}
+          {q.type === "essay" && <span className="text-xs text-gray-400">ตรวจโดยครู</span>}
         </div>
       )}
     </div>

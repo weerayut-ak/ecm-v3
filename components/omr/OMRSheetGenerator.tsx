@@ -1,6 +1,9 @@
 "use client"
 
 import { useState, useEffect, useRef, CSSProperties } from "react"
+import { createClient } from '@/lib/supabase/client'
+import { History, Save, CheckCircle2, ChevronDown, ChevronUp, X } from 'lucide-react'
+
 
 // ─── Load external scripts via <script> tag (Webpack-safe) ───────────────────
 function loadScript(src: string): Promise<void> {
@@ -36,6 +39,24 @@ interface TeacherMeta {
 }
 
 const LABELS = ['A','B','C','D','E']
+
+// ─── Saved Sheet Batch (Supabase) ────────────────────────────────
+interface SheetBatch {
+  id: string
+  exam_id: string | null
+  exam_title: string
+  school: string
+  subject_code: string
+  num_questions: number
+  options_per_q: number
+  copies: number
+  serials: string[]
+  prefix: string
+  year_bce: number
+  start_seq: number
+  created_at: string
+}
+
 function genSerial(prefix: string, year: number, seq: number) {
   return `${prefix}${String(year).slice(-2)}${String(seq).padStart(4,'0')}`
 }
@@ -474,8 +495,9 @@ const DEMO_Q:Question[] = Array.from({length:200},(_,i)=>({
   quiz_id:'1',order:i+1,
 }))
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ─── OMRSheetGenerator ────────────────────────────────────────────────────────
 export default function OMRSheetGenerator({ onClose }: { onClose?: () => void }) {
+  const supabase = createClient()
   const [copies,setCopies]       = useState(3)
   const [showAK,setShowAK]       = useState(false)
   const [quizTitle,setQuizTitle] = useState(DEMO_QUIZ.title)
@@ -499,7 +521,64 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
   const [pdfFilename,setPdfFilename]   = useState('')
   const [showPreview,setShowPreview]   = useState(false)
 
+  // ── Supabase save + history states ──
+  const [saving,setSaving]             = useState(false)
+  const [savedOk,setSavedOk]           = useState(false)
+  const [showHistory,setShowHistory]   = useState(false)
+  const [batches,setBatches]           = useState<SheetBatch[]>([])
+  const [loadingHistory,setLoadingHistory] = useState(false)
+  const [expandedBatch,setExpandedBatch]   = useState<string|null>(null)
+
   const updateMeta = (k: keyof TeacherMeta, v: string) => setMeta(p=>({...p,[k]:v}))
+
+  // ── บันทึก batch ลง Supabase ──────────────────────────────────
+  const saveBatch = async (serialList: string[]) => {
+    if (!useSerial || serialList.length === 0) return
+    setSaving(true); setSavedOk(false)
+    try {
+      const payload = {
+        exam_title:    quizTitle,
+        exam_id:       null as string | null,
+        school:        school,
+        subject_code:  quizTitle,
+        num_questions: numQ,
+        options_per_q: optCount,
+        copies:        copies,
+        serials:       serialList,
+        prefix:        prefix,
+        year_bce:      year,
+        start_seq:     startSeq,
+      }
+      const { error } = await supabase.from('omr_sheet_batches').insert(payload)
+      if (error) throw error
+      setSavedOk(true)
+      setTimeout(() => setSavedOk(false), 4000)
+      // อัปเดต startSeq ให้ไม่ซ้ำกับชุดถัดไป
+      setStartSeq(p => p + copies)
+    } catch (err) {
+      console.error('saveBatch error', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // ── โหลดประวัติ batches ────────────────────────────────────────
+  const loadHistory = async () => {
+    setLoadingHistory(true)
+    const { data } = await supabase
+      .from('omr_sheet_batches')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(50)
+    setBatches((data ?? []) as SheetBatch[])
+    setLoadingHistory(false)
+  }
+
+  const toggleHistory = () => {
+    const next = !showHistory
+    setShowHistory(next)
+    if (next) loadHistory()
+  }
 
   useEffect(()=>{
     loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js').catch(()=>{})
@@ -602,6 +681,11 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
       document.body.removeChild(overlay)  // ลบ overlay ก่อน print dialog โผล่
       window.print()
       root.unmount()
+      // ── บันทึก serials หลัง print สำเร็จ ──
+      const serialList = Array.from({length:copies}, (_,ci) =>
+        useSerial ? genSerial(prefix,year,startSeq+ci) : quizTitle.toUpperCase()
+      )
+      await saveBatch(serialList)
     } catch(err) {
       console.error(err); alert('เกิดข้อผิดพลาด:\n'+String(err))
       if(document.body.contains(overlay)) document.body.removeChild(overlay)
@@ -623,15 +707,16 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
         display:'flex',flexWrap:'wrap',gap:7,alignItems:'center',
         boxShadow:'0 2px 10px rgba(107,33,168,0.1)' }}>
 
+        {/* ── ปุ่มย้อนกลับ ── */}
         {onClose && (
           <button onClick={onClose} style={{
             display:'flex', alignItems:'center', gap:5,
-            padding:'6px 12px', borderRadius:8, border:'none',
-            background:'rgba(107,33,168,0.1)', color:'#6b21a8',
-            fontWeight:700, fontSize:12, cursor:'pointer',
-            flexShrink:0,
+            padding:'5px 11px', borderRadius:7, border:'1.5px solid #ddd',
+            background:'white', color:'#555', fontWeight:700, fontSize:11,
+            cursor:'pointer', flexShrink:0, whiteSpace:'nowrap',
           }}>← ย้อนกลับ</button>
         )}
+
         <div style={{display:'flex',alignItems:'center',gap:7}}>
           <div style={{width:28,height:28,borderRadius:7,background:'#6b21a8',
             display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}>📋</div>
@@ -700,7 +785,33 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
           padding:'5px 12px', fontWeight:700, fontSize:11, cursor:'pointer',
         }}>✏️ รายละเอียดข้อสอบ</button>
 
-        <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center' }}>
+        <div style={{ marginLeft:'auto', display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
+          {/* สถานะบันทึก */}
+          {saving && (
+            <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'#5a1a9e', fontWeight:700 }}>
+              <span style={{ width:12,height:12,borderRadius:'50%',border:'2px solid #c4b5fd',borderTopColor:'#6b21a8',display:'inline-block',animation:'omrg-spin 0.7s linear infinite' }}/>
+              กำลังบันทึก...
+            </div>
+          )}
+          {savedOk && (
+            <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:11, color:'#059669', fontWeight:700,
+              background:'rgba(5,150,105,0.08)', padding:'4px 10px', borderRadius:6, border:'1px solid rgba(5,150,105,0.2)' }}>
+              ✓ บันทึก Serial แล้ว
+            </div>
+          )}
+
+          {/* ปุ่มประวัติ */}
+          <button onClick={toggleHistory} style={{
+            background: showHistory ? '#6b21a8' : 'white',
+            color: showHistory ? 'white' : '#6b21a8',
+            border:'1.5px solid #6b21a8', borderRadius:8,
+            padding:'7px 13px', fontWeight:700, fontSize:12,
+            cursor:'pointer', display:'flex', alignItems:'center', gap:5,
+          }}>
+            <span style={{ fontSize:13 }}>🗂</span> ประวัติ
+            {showHistory ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+          </button>
+
           {pdfUrl&&!showPreview&&(
             <button onClick={()=>setShowPreview(true)} style={{
               background:'white',color:'#6b21a8',border:'1.5px solid #6b21a8',
@@ -716,6 +827,7 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
             {isGenerating?`⏳ กำลังสร้าง PDF… ${progress}%`:`⬇️ โหลด PDF${copies>1?` (${copies} ชุด)`:''}`}
           </button>
         </div>
+        <style>{`@keyframes omrg-spin { to { transform: rotate(360deg); } }`}</style>
       </div>
 
       {/* ── Teacher meta panel ── */}
@@ -745,6 +857,118 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
               </label>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── History Panel ── */}
+      {showHistory && (
+        <div style={{ margin:'8px 14px 0', background:'white', borderRadius:12,
+          border:'1.5px solid #c4b5fd', boxShadow:'0 4px 20px rgba(107,33,168,0.1)', overflow:'hidden' }}>
+          <div style={{ padding:'12px 16px', background:'#6b21a8', display:'flex', alignItems:'center', gap:8 }}>
+            <span style={{ fontSize:14, fontWeight:900, color:'white', flex:1 }}>🗂 ประวัติการสร้างกระดาษ</span>
+            <button onClick={() => setShowHistory(false)} style={{
+              background:'rgba(255,255,255,0.15)', border:'none', color:'white',
+              width:24, height:24, borderRadius:'50%', cursor:'pointer', fontSize:14,
+              display:'flex', alignItems:'center', justifyContent:'center',
+            }}>✕</button>
+          </div>
+
+          {loadingHistory ? (
+            <div style={{ padding:'32px', textAlign:'center', color:'#9ca3af', fontSize:13 }}>
+              <span style={{ display:'inline-block', width:20, height:20, borderRadius:'50%',
+                border:'3px solid #e0d8f5', borderTopColor:'#6b21a8',
+                animation:'omrg-spin 0.7s linear infinite', marginBottom:8 }}/>
+              <br/>กำลังโหลดประวัติ...
+            </div>
+          ) : batches.length === 0 ? (
+            <div style={{ padding:'40px 16px', textAlign:'center' }}>
+              <div style={{ fontSize:36, marginBottom:8 }}>📭</div>
+              <p style={{ fontSize:13, color:'#9ca3af', fontWeight:600 }}>ยังไม่มีประวัติการสร้างกระดาษ</p>
+              <p style={{ fontSize:11, color:'#c4b5fd' }}>หลังโหลด PDF จะบันทึกอัตโนมัติที่นี่</p>
+            </div>
+          ) : (
+            <div style={{ maxHeight:420, overflowY:'auto' }}>
+              {batches.map((b, bi) => (
+                <div key={b.id} style={{
+                  borderBottom: bi < batches.length-1 ? '1px solid #f3f0ff' : 'none',
+                }}>
+                  {/* Batch header row */}
+                  <div
+                    onClick={() => setExpandedBatch(expandedBatch === b.id ? null : b.id)}
+                    style={{ padding:'10px 16px', display:'flex', alignItems:'center', gap:10,
+                      cursor:'pointer', background: expandedBatch === b.id ? '#faf5ff' : 'white',
+                      transition:'background 0.15s',
+                    }}
+                  >
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                        <span style={{ fontWeight:800, fontSize:13, color:'#3b0764' }}>
+                          {b.exam_title || b.subject_code}
+                        </span>
+                        <span style={{ fontSize:10, fontWeight:700, background:'#ede9fe',
+                          color:'#6b21a8', borderRadius:4, padding:'1px 7px', border:'1px solid #c4b5fd' }}>
+                          {b.copies} ชุด
+                        </span>
+                        <span style={{ fontSize:10, color:'#9ca3af' }}>
+                          {b.num_questions}ข้อ · {b.options_per_q}ตัวเลือก
+                        </span>
+                        {b.serials.length > 0 && (
+                          <span style={{ fontFamily:'monospace', fontSize:10, fontWeight:700,
+                            color:'#5a1a9e', background:'rgba(107,33,168,0.06)',
+                            padding:'1px 6px', borderRadius:4 }}>
+                            {b.serials[0]}
+                            {b.serials.length > 1 && ` – ${b.serials[b.serials.length-1]}`}
+                          </span>
+                        )}
+                      </div>
+                      <div style={{ fontSize:10, color:'#9ca3af', marginTop:2 }}>
+                        {b.school && <>{b.school} · </>}
+                        {new Date(b.created_at).toLocaleDateString('th-TH', {
+                          day:'numeric', month:'short', year:'2-digit',
+                          hour:'2-digit', minute:'2-digit'
+                        })}
+                      </div>
+                    </div>
+                    <span style={{ color:'#c4b5fd', fontSize:13, transition:'transform 0.2s',
+                      transform: expandedBatch===b.id ? 'rotate(180deg)' : 'none' }}>▾</span>
+                  </div>
+
+                  {/* Expanded: serial list */}
+                  {expandedBatch === b.id && (
+                    <div style={{ padding:'8px 16px 14px', background:'#faf5ff',
+                      borderTop:'1px solid #ede9fe' }}>
+                      <p style={{ fontSize:10, fontWeight:800, color:'#6b21a8',
+                        textTransform:'uppercase', letterSpacing:'0.08em', margin:'0 0 8px' }}>
+                        รหัสกระดาษทั้งหมด ({b.serials.length} รหัส)
+                      </p>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:4, maxHeight:140, overflowY:'auto' }}>
+                        {b.serials.map((s, si) => (
+                          <span key={si} style={{ fontSize:10, fontWeight:700,
+                            background:'white', color:'#5a1a9e',
+                            borderRadius:4, padding:'2px 8px',
+                            border:'1px solid #c4b5fd', fontFamily:'monospace',
+                            letterSpacing:'0.04em' }}>
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                      {/* ปุ่ม copy all serials */}
+                      <button
+                        onClick={() => {
+                          navigator.clipboard.writeText(b.serials.join('\n'))
+                          .then(() => alert('คัดลอก ' + b.serials.length + ' รหัสแล้ว'))
+                        }}
+                        style={{ marginTop:10, padding:'5px 14px', borderRadius:6,
+                          background:'#6b21a8', color:'white', border:'none',
+                          fontSize:11, fontWeight:700, cursor:'pointer' }}>
+                        📋 คัดลอกรหัสทั้งหมด
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -37,6 +37,22 @@ interface OMRResult {
   scanned_at: string
 }
 
+interface SheetBatch {
+  id: string
+  exam_id: string | null
+  exam_title: string
+  school: string
+  subject_code: string
+  num_questions: number
+  options_per_q: number
+  copies: number
+  serials: string[]
+  prefix: string
+  year_bce: number
+  start_seq: number
+  created_at: string
+}
+
 /* ── CSS (mobile-first) ──────────────────────────────────────────── */
 const CSS = `
   .omr-admin { max-width: 1000px; margin: 0 auto; font-family: var(--font, system-ui); padding: 0 4px; }
@@ -326,64 +342,214 @@ function ResultsTable({ results, exam }: { results: OMRResult[]; exam: OMRExam }
 }
 
 /* ── Barcode Lookup result viewer ───────────────────────────────── */
+/* ── BarcodeResultViewer ────────────────────────────────────────────────────
+   ค้นหา serial ใน 2 ที่:
+   1. omr_results  → เคยสแกนแล้ว → แสดงผลสอบ
+   2. omr_sheet_batches → สร้างกระดาษแล้วแต่ยังไม่สแกน → แสดงข้อมูล batch
+─────────────────────────────────────────────────────────────────────────── */
+type BarcodeViewState =
+  | 'loading'
+  | { kind: 'scanned';    result: OMRResult; exam: OMRExam | null }
+  | { kind: 'batch_only'; batch: SheetBatch }
+  | 'notfound'
+
 function BarcodeResultViewer({ serial, exams, onClose }: {
   serial: string
   exams: OMRExam[]
   onClose: () => void
 }) {
   const supabase = createClient()
-  const [result, setResult] = useState<OMRResult | null | 'loading' | 'notfound'>('loading')
-  const [exam, setExam] = useState<OMRExam | null>(null)
+  const [state, setState] = useState<BarcodeViewState>('loading')
 
   useEffect(() => {
     async function load() {
-      const { data, error } = await supabase
+      setState('loading')
+      const normSerial = serial.trim().toUpperCase()
+
+      // ── ค้นหา 1: omr_results ──────────────────────────────────────
+      const { data: resultData } = await supabase
         .from('omr_results')
         .select('*')
-        .eq('sheet_serial', serial)
+        .eq('sheet_serial', normSerial)
         .order('scanned_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (error || !data) { setResult('notfound'); return }
-      let foundExam = exams.find(e => e.id === data.exam_id)
-      // ถ้าไม่เจอใน cache ให้ fetch จาก DB
-      if (!foundExam) {
-        const { data: examData } = await supabase
-          .from('omr_exams').select('*').eq('id', data.exam_id).single()
-        foundExam = examData ?? undefined
+
+      if (resultData) {
+        // เจอผลสอบ — หา exam จาก cache ก่อน ถ้าไม่เจอ fetch จาก DB
+        let foundExam = exams.find(e => e.id === resultData.exam_id) ?? null
+        if (!foundExam) {
+          const { data: examData } = await supabase
+            .from('omr_exams').select('*').eq('id', resultData.exam_id).maybeSingle()
+          foundExam = examData as OMRExam | null
+        }
+        setState({ kind: 'scanned', result: resultData as OMRResult, exam: foundExam })
+        return
       }
-      setExam(foundExam ?? null)
-      setResult(data as OMRResult)
+
+      // ── ค้นหา 2: omr_sheet_batches ───────────────────────────────
+      const { data: batchData } = await supabase
+        .from('omr_sheet_batches')
+        .select('*')
+        .contains('serials', [normSerial])
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      if (batchData) {
+        setState({ kind: 'batch_only', batch: batchData as SheetBatch })
+        return
+      }
+
+      setState('notfound')
     }
     load()
   }, [serial])
 
-  if (result === 'loading') return (
+  // ── Loading ──────────────────────────────────────────────────────
+  if (state === 'loading') return (
     <div style={{ textAlign:'center', padding:'60px 0', color:'var(--text-3,#9ca3af)' }}>
       <div className="spinner" style={{ margin:'0 auto 12px', width:28, height:28, borderWidth:3 }} />
-      <p>กำลังค้นหา #{serial}...</p>
+      <p style={{ fontSize:13 }}>กำลังค้นหา <span style={{ fontFamily:'monospace', fontWeight:800 }}>#{serial}</span>...</p>
     </div>
   )
 
-  if (result === 'notfound' || !exam) return (
-    <div style={{ textAlign:'center', padding:'60px 0' }}>
-      <div style={{ fontSize:40, marginBottom:12 }}>🔍</div>
+  // ── Not found ────────────────────────────────────────────────────
+  if (state === 'notfound') return (
+    <div style={{ textAlign:'center', padding:'60px 24px' }}>
+      <div style={{ fontSize:44, marginBottom:12 }}>🔍</div>
       <h3 style={{ fontSize:16, fontWeight:700, marginBottom:6 }}>ไม่พบรหัส #{serial}</h3>
-      <p style={{ fontSize:13, color:'var(--text-3,#9ca3af)', marginBottom:20 }}>รหัสกระดาษนี้ยังไม่มีในระบบ</p>
+      <p style={{ fontSize:13, color:'var(--text-3,#9ca3af)', marginBottom:20 }}>
+        รหัสกระดาษนี้ยังไม่มีในระบบ<br/>
+        <span style={{ fontSize:11 }}>ตรวจสอบว่าสร้างกระดาษแล้วและรหัสถูกต้อง</span>
+      </p>
       <button className="btn" onClick={onClose}>← ย้อนกลับ</button>
     </div>
   )
+
+  // ── พบใน batch เท่านั้น (ยังไม่ได้สแกน) ─────────────────────────
+  if (state.kind === 'batch_only') {
+    const { batch } = state
+    const batchExam = exams.find(e => e.id === batch.exam_id)
+    return (
+      <div style={{ maxWidth:600, margin:'0 auto', padding:'20px 16px' }}>
+        {/* Toolbar */}
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20 }}>
+          <button className="rbtn" onClick={onClose} style={{ padding:'8px 12px', display:'flex', alignItems:'center', gap:5, fontSize:13 }}>
+            ← ย้อนกลับ
+          </button>
+          <div>
+            <p style={{ fontSize:10, fontWeight:800, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--primary,#0050cb)', margin:0 }}>
+              ข้อมูลกระดาษคำตอบ
+            </p>
+            <p style={{ fontSize:14, fontWeight:700, margin:0 }}>#{serial}</p>
+          </div>
+        </div>
+
+        {/* Status card — ยังไม่ได้สแกน */}
+        <div style={{
+          background: 'rgba(245,158,11,0.07)', border: '1.5px solid rgba(245,158,11,0.3)',
+          borderRadius:16, padding:'16px 18px', marginBottom:16,
+          display:'flex', alignItems:'flex-start', gap:12,
+        }}>
+          <span style={{ fontSize:28, flexShrink:0 }}>⏳</span>
+          <div>
+            <p style={{ fontWeight:800, fontSize:14, color:'#92400e', margin:'0 0 4px' }}>
+              ยังไม่ได้สแกนตรวจ
+            </p>
+            <p style={{ fontSize:12, color:'#b45309', margin:0, lineHeight:1.5 }}>
+              กระดาษรหัสนี้ถูกสร้างแล้วแต่ยังไม่มีผลการตรวจ<br/>
+              นำกระดาษไปสแกนในระบบเพื่อบันทึกผล
+            </p>
+          </div>
+        </div>
+
+        {/* Batch info */}
+        <div style={{ background:'var(--surface,#fff)', borderRadius:16, border:'1px solid var(--border,#e5e7eb)', padding:'18px 18px', marginBottom:12 }}>
+          <p style={{ fontSize:10, fontWeight:800, color:'var(--text-3,#9ca3af)', textTransform:'uppercase', letterSpacing:'0.08em', margin:'0 0 14px' }}>
+            ข้อมูลชุดกระดาษ
+          </p>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))', gap:12 }}>
+            {[
+              { label:'รหัสวิชา',      value: batch.subject_code || batch.exam_title },
+              { label:'สถาบัน',         value: batch.school || '—' },
+              { label:'จำนวนข้อ',       value: `${batch.num_questions} ข้อ · ${batch.options_per_q} ตัวเลือก` },
+              { label:'จำนวนชุด',        value: `${batch.copies} ชุด` },
+              { label:'ช่วง Serial',    value: batch.serials.length > 0 ? `${batch.serials[0]} – ${batch.serials[batch.serials.length-1]}` : '—' },
+              { label:'สร้างเมื่อ',     value: new Date(batch.created_at).toLocaleDateString('th-TH', { day:'numeric', month:'short', year:'2-digit', hour:'2-digit', minute:'2-digit' }) },
+            ].map(f => (
+              <div key={f.label}>
+                <div style={{ fontSize:10, fontWeight:700, color:'var(--text-3,#9ca3af)', marginBottom:2 }}>{f.label}</div>
+                <div style={{ fontSize:13, fontWeight:700, color:'var(--on-surface,#111)' }}>{f.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ถ้ามี exam ให้เสนอสแกน */}
+        {batchExam && (
+          <div style={{ background:'rgba(0,80,203,0.05)', borderRadius:12, border:'1px solid rgba(0,80,203,0.15)', padding:'12px 16px', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+            <div style={{ flex:1, minWidth:120 }}>
+              <p style={{ fontWeight:700, fontSize:13, margin:'0 0 2px' }}>พร้อมสแกนตรวจ?</p>
+              <p style={{ fontSize:11, color:'var(--text-3,#9ca3af)', margin:0 }}>ชุดข้อสอบ: {batchExam.title}</p>
+            </div>
+            <button
+              className="rbtn primary"
+              onClick={() => {
+                /* ส่ง event ขึ้นไปให้ Dashboard เปิด scanner */
+                onClose()
+              }}
+              style={{ padding:'9px 18px', fontSize:13, display:'flex', alignItems:'center', gap:6 }}
+            >
+              📷 ไปสแกนตรวจ
+            </button>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // ── พบผลสอบ → แสดงด้วย OMRResultClient ────────────────────────
+  const { result, exam } = state
+  if (!exam) {
+    // มีผลสอบแต่หา exam ไม่เจอ → แสดง minimal view
+    return (
+      <div style={{ maxWidth:600, margin:'0 auto', padding:'20px 16px' }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20 }}>
+          <button className="rbtn" onClick={onClose} style={{ padding:'8px 12px', fontSize:13 }}>← ย้อนกลับ</button>
+          <p style={{ fontWeight:700, margin:0 }}>ผลการสอบ #{serial}</p>
+        </div>
+        <div style={{ background:'rgba(220,38,38,0.06)', borderRadius:12, border:'1px solid rgba(220,38,38,0.2)', padding:'14px 16px' }}>
+          <p style={{ fontWeight:700, color:'#dc2626', margin:'0 0 4px' }}>⚠️ ไม่พบข้อมูลชุดข้อสอบ</p>
+          <p style={{ fontSize:12, color:'#9ca3af', margin:0 }}>ผลการสอบมีอยู่ในระบบ แต่ไม่พบชุดข้อสอบที่เชื่อมกัน กรุณาตรวจสอบกับผู้ดูแลระบบ</p>
+        </div>
+        <div style={{ marginTop:14, padding:'12px 16px', background:'var(--surface,#fff)', borderRadius:12, border:'1px solid var(--border,#e5e7eb)' }}>
+          {[
+            { label:'นักเรียน', value:result.student_name||'—' },
+            { label:'รหัส',     value:result.student_code||'—' },
+            { label:'ชั้น',     value:result.grade||'—' },
+            { label:'คะแนน',   value:`${result.score}% (${result.is_passed?'ผ่าน':'ไม่ผ่าน'})` },
+          ].map(f => (
+            <div key={f.label} style={{ display:'flex', gap:12, padding:'5px 0', borderBottom:'1px solid var(--surface-low,#f3f4f6)' }}>
+              <span style={{ fontSize:12, color:'var(--text-3,#9ca3af)', fontWeight:700, minWidth:60 }}>{f.label}</span>
+              <span style={{ fontSize:13, fontWeight:700 }}>{f.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <OMRResultClient
       exam={exam}
       scanResult={{
-        examId: result.exam_id,
+        examId:      result.exam_id,
         studentName: result.student_name,
         studentCode: result.student_code,
-        grade: result.grade,
-        answers: result.answers,
-        scannedAt: result.scanned_at,
+        grade:       result.grade,
+        answers:     result.answers,
+        scannedAt:   result.scanned_at,
         sheetSerial: result.sheet_serial ?? '',
       }}
       onRescan={onClose}
@@ -490,12 +656,11 @@ export default function OMRAdminDashboard() {
 
   // ── Scan result / entry form ──
   if (view.type === 'result') {
-    const examRef = view.exam
     return (
       <OMRResultClient
-        exam={examRef}
+        exam={view.exam}
         scanResult={{
-          examId:      examRef.id,
+          examId:      view.exam.id,
           studentName: '',
           studentCode: '',
           grade:       '',
@@ -503,12 +668,8 @@ export default function OMRAdminDashboard() {
           scannedAt:   new Date().toISOString(),
           sheetSerial: view.serial,
         }}
-        onRescan={() => setView({ type:'scanning', exam:examRef })}
-        onClose={() => {
-          // Invalidate cache so results table shows new entry
-          setResults(p => { const n={...p}; delete n[examRef.id]; return n })
-          setView({ type:'dashboard' })
-        }}
+        onRescan={() => setView({ type:'scanning', exam:view.exam })}
+        onClose={() => setView({ type:'dashboard' })}
       />
     )
   }
@@ -618,13 +779,7 @@ export default function OMRAdminDashboard() {
                       </div>
                     </div>
                     <div style={{ padding:'14px 16px 16px', borderTop:'1px solid var(--border,#e5e7eb)', background:'var(--surface-low,#f3f4f6)' }}>
-                      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:12 }}>
-                        <p style={{ fontSize:11, fontWeight:700, color:'var(--text-3,#9ca3af)', textTransform:'uppercase', letterSpacing:'0.08em', margin:0 }}>ผลการสแกน</p>
-                        <button onClick={e => { e.stopPropagation(); setResults(p => { const n={...p}; delete n[exam.id]; return n }); loadResults(exam.id) }}
-                          style={{ fontSize:11, fontWeight:700, color:'var(--primary,#0050cb)', background:'none', border:'none', cursor:'pointer', padding:'2px 6px' }}>
-                          ↻ โหลดใหม่
-                        </button>
-                      </div>
+                      <p style={{ fontSize:11, fontWeight:700, color:'var(--text-3,#9ca3af)', marginBottom:12, textTransform:'uppercase', letterSpacing:'0.08em' }}>ผลการสแกน</p>
                       <ResultsTable results={results[exam.id]??[]} exam={exam} />
                     </div>
                   </div>

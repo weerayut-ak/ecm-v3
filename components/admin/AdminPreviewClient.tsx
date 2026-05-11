@@ -2,8 +2,7 @@
 import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, Clock, Eye, ChevronLeft, ChevronRight, CheckCircle2 } from "lucide-react"
-import type { Question, QuizOption } from "@/types/quiz"
-import type { Quiz } from "@/types/quiz"
+import type { Question, QuizOption, Quiz } from "@/types/quiz"
 
 interface AdminPreviewClientProps {
   quiz: Quiz
@@ -13,10 +12,11 @@ interface AdminPreviewClientProps {
 export default function AdminPreviewClient({ quiz, questions }: AdminPreviewClientProps) {
   const router = useRouter()
   const [currentIdx, setCurrentIdx] = useState(0)
-  const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [fillInput, setFillInput] = useState("")
-  const [timeLeft, setTimeLeft] = useState(quiz.time_limit ? quiz.time_limit * 60 : null)
-  const [submitted, setSubmitted] = useState(false)
+  const [answers, setAnswers]       = useState<Record<string, string>>({})
+  const [fillInput, setFillInput]   = useState("")
+  const [timeLeft, setTimeLeft]     = useState(quiz.time_limit ? quiz.time_limit * 60 : null)
+  const [submitted, setSubmitted]   = useState(false)
+  const [navOpen, setNavOpen]       = useState(false) // mobile navigator drawer
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
@@ -30,129 +30,98 @@ export default function AdminPreviewClient({ quiz, questions }: AdminPreviewClie
     return () => clearInterval(timerRef.current!)
   }, [submitted])
 
-  function formatTime(s: number) {
-    const m = Math.floor(s / 60)
-    const sec = s % 60
-    return `${m}:${sec.toString().padStart(2, "0")}`
+  function fmt(s: number) {
+    return `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`
   }
 
-  const currentQ = questions[currentIdx]
-  const answeredCount = Object.keys(answers).length
-  const totalQ = questions.length
+  const currentQ    = questions[currentIdx]
+  const totalQ      = questions.length
+  const answered    = Object.keys(answers).length
+  const timerDanger = timeLeft !== null && timeLeft < 60
 
-  function selectAnswer(value: string) {
+  function select(val: string) {
     if (!currentQ) return
-    setAnswers(p => ({ ...p, [currentQ.id]: value }))
+    setAnswers(p => ({ ...p, [currentQ.id]: val }))
   }
 
-  function handleNext() {
-    if (currentQ?.type === "fill" && fillInput.trim()) {
+  function goNext() {
+    if (currentQ?.type === "fill" && fillInput.trim())
       setAnswers(p => ({ ...p, [currentQ.id]: fillInput }))
-    }
     if (currentIdx < totalQ - 1) {
       setCurrentIdx(p => p + 1)
       setFillInput(answers[questions[currentIdx + 1]?.id] ?? "")
     }
+    setNavOpen(false)
   }
 
-  function handlePrev() {
+  function goPrev() {
     if (currentIdx > 0) {
       setCurrentIdx(p => p - 1)
       setFillInput(answers[questions[currentIdx - 1]?.id] ?? "")
     }
+    setNavOpen(false)
   }
 
-  function handleJump(idx: number) {
+  function jump(idx: number) {
     setCurrentIdx(idx)
     setFillInput(answers[questions[idx]?.id] ?? "")
+    setNavOpen(false)
   }
 
-  function handleSubmit() {
+  function submit() {
     setSubmitted(true)
     clearInterval(timerRef.current!)
   }
 
-  const score = questions.reduce((sum, q) => {
-    if (q.type !== "mcq") return sum
-    return answers[q.id] === q.correct_answer ? sum + (q.points ?? 1) : sum
-  }, 0)
-  const maxScore = questions.reduce((sum, q) => sum + (q.points ?? 1), 0)
+  function restart() {
+    setSubmitted(false); setAnswers({}); setCurrentIdx(0)
+    setFillInput(""); setNavOpen(false)
+    setTimeLeft(quiz.time_limit ? quiz.time_limit * 60 : null)
+  }
+
+  const score      = questions.reduce((s, q) => q.type !== "mcq" ? s : answers[q.id] === q.correct_answer ? s + (q.points ?? 1) : s, 0)
+  const maxScore   = questions.reduce((s, q) => s + (q.points ?? 1), 0)
   const percentage = maxScore > 0 ? Math.round((score / maxScore) * 100) : 0
-  const passed = percentage >= (quiz.pass_score ?? 60)
-  const timerDanger = timeLeft !== null && timeLeft < 60
+  const passed     = percentage >= (quiz.pass_score ?? 60)
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div className="max-w-[900px] mx-auto px-3 sm:px-4 py-4">
 
-      {/* ── Admin Header ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-        <button
-          className="btn btn-sm btn-ghost"
-          onClick={() => router.back()}
-          style={{ display: "flex", alignItems: "center", gap: 5, borderRadius: 4 }}
-        >
-          <ArrowLeft size={13} /> กลับ
-        </button>
-      </div>
+      {/* ── Back ── */}
+      <button
+        className="btn btn-sm btn-ghost flex items-center gap-1.5 rounded mb-3"
+        onClick={() => router.back()}
+      >
+        <ArrowLeft size={13} /> กลับ
+      </button>
 
-      {/* ── Preview Banner ── */}
-      <div style={{
-        padding: "10px 18px",
-        borderRadius: 6,
-        marginBottom: 16,
-        background: "rgba(217,119,6,0.08)",
-        border: "1.5px dashed var(--amber)",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-      }}>
-        <Eye size={15} style={{ color: "var(--amber)", flexShrink: 0 }} />
+      {/* ── Preview banner ── */}
+      <div className="flex items-start gap-2.5 px-3 sm:px-4 py-3 rounded border-2 border-dashed border-amber-400 bg-amber-50 mb-4">
+        <Eye size={15} className="text-amber-500 shrink-0 mt-0.5" />
         <div>
-          <p style={{ fontSize: 13, fontWeight: 700, color: "var(--amber)" }}>
-            โหมดพรีวิว — ผู้ดูแลระบบเท่านั้น
-          </p>
-          <p style={{ fontSize: 11, color: "var(--text-3)" }}>
-            นี่คือตัวอย่างหน้าทำข้อสอบของนักเรียน คำตอบที่กดจะไม่ถูกบันทึกจริง
-          </p>
+          <p className="text-sm font-bold text-amber-600">โหมดพรีวิว — ผู้ดูแลระบบเท่านั้น</p>
+          <p className="text-[11px] text-gray-500 mt-0.5">คำตอบที่กดจะไม่ถูกบันทึกจริง</p>
         </div>
       </div>
 
-      {/* ── Quiz Header Card ── */}
-      <div className="card" style={{ padding: "18px 22px", marginBottom: 14, borderRadius: 6 }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <h1 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>{quiz.title}</h1>
-            {quiz.description && (
-              <p style={{ fontSize: 13, color: "var(--text-3)", marginBottom: 8, lineHeight: 1.6 }}>
-                {quiz.description}
-              </p>
-            )}
-            <div style={{ display: "flex", gap: 12, fontSize: 12, color: "var(--text-2)", flexWrap: "wrap" }}>
+      {/* ── Quiz header card ── */}
+      <div className="card rounded p-4 sm:p-5 mb-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg sm:text-xl font-bold mb-1">{quiz.title}</h1>
+            {quiz.description && <p className="text-sm text-gray-400 mb-2 leading-relaxed">{quiz.description}</p>}
+            <div className="flex flex-wrap gap-3 text-xs text-gray-500">
               <span>📝 {totalQ} ข้อ</span>
               <span>🎯 ผ่าน {quiz.pass_score}%</span>
-              {quiz.time_limit && <span><Clock size={11} style={{ display: "inline", marginRight: 3 }} />{quiz.time_limit} นาที</span>}
+              {quiz.time_limit && <span className="flex items-center gap-1"><Clock size={11} />{quiz.time_limit} นาที</span>}
             </div>
           </div>
-
           {/* Timer */}
           {timeLeft !== null && !submitted && (
-            <div style={{
-              padding: "10px 16px",
-              borderRadius: 6,
-              border: `2px solid ${timerDanger ? "var(--red)" : "var(--border)"}`,
-              background: timerDanger ? "rgba(220,38,38,0.06)" : "var(--bg-2)",
-              textAlign: "center",
-              flexShrink: 0,
-            }}>
-              <p style={{ fontSize: 10, color: timerDanger ? "var(--red)" : "var(--text-3)", marginBottom: 2 }}>
-                เวลาที่เหลือ
-              </p>
-              <p style={{
-                fontSize: 24, fontWeight: 800,
-                color: timerDanger ? "var(--red)" : "var(--text)",
-                fontVariantNumeric: "tabular-nums",
-              }}>
-                {formatTime(timeLeft)}
+            <div className={`rounded border-2 px-3 py-2 text-center shrink-0 ${timerDanger ? "border-red-400 bg-red-50" : "border-gray-200 bg-gray-50"}`}>
+              <p className={`text-[10px] mb-0.5 ${timerDanger ? "text-red-500" : "text-gray-400"}`}>เวลาที่เหลือ</p>
+              <p className={`text-2xl font-extrabold tabular-nums ${timerDanger ? "text-red-600" : "text-gray-800"}`}>
+                {fmt(timeLeft)}
               </p>
             </div>
           )}
@@ -160,324 +129,254 @@ export default function AdminPreviewClient({ quiz, questions }: AdminPreviewClie
 
         {/* Progress bar */}
         {!submitted && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-3)", marginBottom: 4 }}>
-              <span>ตอบแล้ว {answeredCount} / {totalQ} ข้อ</span>
-              <span>{Math.round((answeredCount / totalQ) * 100)}%</span>
+          <div className="mt-3">
+            <div className="flex justify-between text-[11px] text-gray-400 mb-1">
+              <span>ตอบแล้ว {answered}/{totalQ} ข้อ</span>
+              <span>{Math.round((answered / totalQ) * 100)}%</span>
             </div>
-            <div style={{ height: 5, borderRadius: 2, background: "var(--border)", overflow: "hidden" }}>
-              <div style={{
-                height: "100%",
-                width: `${(answeredCount / totalQ) * 100}%`,
-                background: "var(--blue)",
-                borderRadius: 2,
-                transition: "width 0.3s ease",
-              }} />
+            <div className="h-1.5 rounded bg-gray-200 overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded transition-all duration-300"
+                style={{ width: `${(answered / totalQ) * 100}%` }}
+              />
             </div>
           </div>
         )}
       </div>
 
-      {/* ── Submitted Result ── */}
+      {/* ── SUBMITTED: result ── */}
       {submitted ? (
-        <div className="card" style={{ padding: "40px 24px", textAlign: "center", borderRadius: 6 }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>
-            {passed ? "🎉" : "😔"}
-          </div>
-          <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>
-            {passed ? "ผ่านแบบทดสอบ!" : "ยังไม่ผ่าน"}
-          </h2>
-          <p style={{ fontSize: 14, color: "var(--text-2)", marginBottom: 20 }}>
+        <div className="card rounded p-6 sm:p-10 text-center">
+          <div className="text-5xl mb-3">{passed ? "🎉" : "😔"}</div>
+          <h2 className="text-xl font-bold mb-1">{passed ? "ผ่านแบบทดสอบ!" : "ยังไม่ผ่าน"}</h2>
+          <p className="text-sm text-gray-500 mb-4">
             ได้คะแนน {score} / {maxScore} คะแนน ({percentage}%)
           </p>
-
-          <div style={{
-            display: "inline-block",
-            padding: "8px 24px",
-            borderRadius: 6,
-            background: passed ? "var(--green-light)" : "rgba(220,38,38,0.08)",
-            color: passed ? "var(--green)" : "var(--red)",
-            fontSize: 14, fontWeight: 700,
-            marginBottom: 24,
-            border: passed ? "1px solid rgba(22,163,74,0.3)" : "1px solid rgba(220,38,38,0.3)",
-          }}>
+          <span className={`inline-block rounded px-5 py-2 text-sm font-bold border mb-6
+            ${passed ? "bg-green-50 text-green-700 border-green-300" : "bg-red-50 text-red-600 border-red-200"}`}>
             {passed ? `✓ ผ่าน (เกณฑ์ ${quiz.pass_score}%)` : `✗ ไม่ผ่าน (เกณฑ์ ${quiz.pass_score}%)`}
-          </div>
+          </span>
 
           {/* Answer review */}
-          <div style={{ textAlign: "left", marginTop: 8 }}>
-            <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>เฉลย</h3>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div className="text-left mt-2">
+            <h3 className="text-sm font-bold mb-3">เฉลย</h3>
+            <div className="flex flex-col gap-2.5">
               {questions.map((q, i) => {
-                const userAns = answers[q.id]
+                const userAns   = answers[q.id]
                 const isCorrect = q.type === "mcq" ? userAns === q.correct_answer
                   : q.type === "fill" ? userAns?.toLowerCase().trim() === (q.correct_answer ?? "").toLowerCase().trim()
                   : null
-
                 return (
-                  <div key={q.id} style={{
-                    padding: "12px 14px", borderRadius: 6,
-                    border: `1px solid ${isCorrect === true ? "rgba(22,163,74,0.25)" : isCorrect === false ? "rgba(220,38,38,0.25)" : "var(--border)"}`,
-                    background: isCorrect === true ? "rgba(22,163,74,0.04)" : isCorrect === false ? "rgba(220,38,38,0.04)" : "var(--surface)",
-                  }}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, flexShrink: 0 }}>ข้อ {i + 1}.</span>
-                      <div style={{ flex: 1 }}>
-                        <p style={{ fontSize: 13, marginBottom: 6 }}>{q.question_text}</p>
+                  <div key={q.id}
+                    className={`rounded border p-3 ${isCorrect === true ? "bg-green-50/60 border-green-200" : isCorrect === false ? "bg-red-50/60 border-red-200" : "border-gray-200"}`}>
+                    <div className="flex gap-2.5 items-start">
+                      <span className="text-sm font-bold shrink-0">ข้อ {i + 1}.</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm mb-2">{q.question_text}</p>
                         {q.type === "mcq" && q.options && (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                          <div className="flex flex-wrap gap-1.5">
                             {(q.options as QuizOption[]).map((opt, oi) => {
-                              const isSelected = userAns === String(oi)
-                              const isCorrectOpt = q.correct_answer === String(oi)
+                              const isSel  = userAns === String(oi)
+                              const isCor  = q.correct_answer === String(oi)
                               return (
-                                <span key={oi} style={{
-                                  fontSize: 11, padding: "2px 8px", borderRadius: 4,
-                                  background: isCorrectOpt ? "var(--green-light)" : isSelected ? "rgba(220,38,38,0.08)" : "var(--bg-2)",
-                                  color: isCorrectOpt ? "var(--green)" : isSelected ? "var(--red)" : "var(--text-3)",
-                                  fontWeight: isSelected || isCorrectOpt ? 700 : 400,
-                                  border: isCorrectOpt ? "1px solid rgba(22,163,74,0.3)" : isSelected ? "1px solid rgba(220,38,38,0.3)" : "1px solid var(--border)",
-                                }}>
-                                  {opt.label}. {opt.text}
-                                  {isCorrectOpt ? " ✓" : isSelected && !isCorrectOpt ? " ✗" : ""}
+                                <span key={oi}
+                                  className={`text-[11px] px-2 py-0.5 rounded border font-medium
+                                    ${isCor ? "bg-green-50 text-green-700 border-green-300 font-bold"
+                                      : isSel ? "bg-red-50 text-red-600 border-red-200"
+                                      : "bg-gray-50 text-gray-500 border-gray-200"}`}>
+                                  {opt.label}. {opt.text}{isCor ? " ✓" : isSel && !isCor ? " ✗" : ""}
                                 </span>
                               )
                             })}
                           </div>
                         )}
                         {q.type === "fill" && (
-                          <p style={{ fontSize: 12, color: "var(--text-2)" }}>
+                          <p className="text-xs text-gray-600">
                             คำตอบของคุณ: <strong>{userAns ?? "(ไม่ตอบ)"}</strong>
-                            {" "}| เฉลย: <strong style={{ color: "var(--green)" }}>{q.correct_answer}</strong>
+                            {" "}| เฉลย: <strong className="text-green-700">{q.correct_answer}</strong>
                           </p>
                         )}
                         {q.type === "essay" && (
-                          <p style={{ fontSize: 12, color: "var(--text-3)" }}>คำตอบ: {userAns ?? "(ไม่ตอบ)"}</p>
+                          <p className="text-xs text-gray-400">คำตอบ: {userAns ?? "(ไม่ตอบ)"}</p>
                         )}
                       </div>
-                      <span style={{ fontSize: 16, flexShrink: 0 }}>
-                        {isCorrect === true ? "✅" : isCorrect === false ? "❌" : "📝"}
-                      </span>
+                      <span className="text-base shrink-0">{isCorrect === true ? "✅" : isCorrect === false ? "❌" : "📝"}</span>
                     </div>
                   </div>
                 )
               })}
             </div>
           </div>
-
-          <button
-            className="btn btn-primary"
-            style={{ marginTop: 24, justifyContent: "center", borderRadius: 4 }}
-            onClick={() => {
-              setSubmitted(false)
-              setAnswers({})
-              setCurrentIdx(0)
-              setFillInput("")
-              setTimeLeft(quiz.time_limit ? quiz.time_limit * 60 : null)
-            }}
-          >
-            ทำอีกครั้ง (พรีวิว)
-          </button>
+          <button className="btn btn-primary rounded mt-6 mx-auto" onClick={restart}>ทำอีกครั้ง (พรีวิว)</button>
         </div>
       ) : (
-        /* ── Quiz Body ── */
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", gap: 14, alignItems: "start" }}>
+        /* ── QUIZ BODY ── */
+        <>
+          {/* Mobile: navigator toggle bar */}
+          <div className="flex items-center justify-between mb-3 lg:hidden">
+            <div className="flex gap-1">
+              <button className="btn btn-sm rounded flex items-center gap-1" onClick={goPrev} disabled={currentIdx === 0}>
+                <ChevronLeft size={13} /> ก่อนหน้า
+              </button>
+              <button className="btn btn-sm rounded flex items-center gap-1" onClick={goNext} disabled={currentIdx === totalQ - 1}>
+                ถัดไป <ChevronRight size={13} />
+              </button>
+            </div>
+            <button
+              className="btn btn-sm rounded flex items-center gap-1 text-blue-600"
+              onClick={() => setNavOpen(p => !p)}
+            >
+              ข้อ {currentIdx + 1}/{totalQ}
+            </button>
+          </div>
 
-          {/* Question Card */}
-          {currentQ && (
-            <div className="card" style={{ padding: "20px 22px", borderRadius: 6 }}>
-
-              {/* Question number */}
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 4,
-                  background: "var(--blue)", color: "#fff",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 14, fontWeight: 800,
-                }}>
-                  {currentIdx + 1}
-                </div>
-                <div>
-                  <p style={{ fontSize: 11, color: "var(--text-3)" }}>ข้อที่ {currentIdx + 1} จาก {totalQ}</p>
-                  <p style={{ fontSize: 11, color: "var(--text-3)" }}>
-                    {currentQ.type === "mcq" ? "ปรนัย" : currentQ.type === "fill" ? "เติมคำ" : "อัตนัย"} · {currentQ.points} คะแนน
-                  </p>
-                </div>
+          {/* Mobile: navigator drawer */}
+          {navOpen && (
+            <div className="mb-3 card rounded p-3 lg:hidden">
+              <div className="grid grid-cols-6 sm:grid-cols-8 gap-1.5 mb-3">
+                {questions.map((q, i) => {
+                  const isAns = !!answers[q.id]; const isCur = i === currentIdx
+                  return (
+                    <button key={q.id} onClick={() => jump(i)}
+                      className={`aspect-square rounded text-xs font-bold border transition-colors
+                        ${isCur ? "bg-blue-600 text-white border-blue-600"
+                          : isAns ? "bg-green-50 text-green-700 border-green-300"
+                          : "bg-white text-gray-500 border-gray-200"}`}>
+                      {i + 1}
+                    </button>
+                  )
+                })}
               </div>
-
-              {/* Question text */}
-              <p style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.7, marginBottom: 18 }}>
-                {currentQ.question_text}
-              </p>
-
-              {/* MCQ Options */}
-              {currentQ.type === "mcq" && currentQ.options && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {(currentQ.options as QuizOption[]).map((opt, oi) => {
-                    const selected = answers[currentQ.id] === String(oi)
-                    return (
-                      <button
-                        key={oi}
-                        onClick={() => selectAnswer(String(oi))}
-                        style={{
-                          padding: "11px 14px",
-                          borderRadius: 6,
-                          border: `2px solid ${selected ? "var(--blue)" : "var(--border)"}`,
-                          background: selected ? "var(--blue-light)" : "var(--surface)",
-                          color: selected ? "var(--blue)" : "var(--text)",
-                          cursor: "pointer",
-                          textAlign: "left",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          transition: "all 0.15s",
-                          fontWeight: selected ? 600 : 400,
-                          fontSize: 14,
-                        }}
-                      >
-                        <div style={{
-                          width: 28, height: 28, borderRadius: 4, flexShrink: 0,
-                          background: selected ? "var(--blue)" : "var(--bg-2)",
-                          color: selected ? "#fff" : "var(--text-3)",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 12, fontWeight: 700,
-                          border: "1px solid var(--border)",
-                        }}>
-                          {opt.label}
-                        </div>
-                        {opt.text}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-
-              {/* Fill answer */}
-              {currentQ.type === "fill" && (
-                <input
-                  className="input"
-                  style={{ fontSize: 15, borderRadius: 4 }}
-                  placeholder="พิมพ์คำตอบ..."
-                  value={fillInput}
-                  onChange={e => {
-                    setFillInput(e.target.value)
-                    setAnswers(p => ({ ...p, [currentQ.id]: e.target.value }))
-                  }}
-                  autoFocus
-                />
-              )}
-
-              {/* Essay */}
-              {currentQ.type === "essay" && (
-                <textarea
-                  className="input"
-                  rows={5}
-                  placeholder="เขียนคำตอบของคุณที่นี่..."
-                  value={answers[currentQ.id] ?? ""}
-                  onChange={e => setAnswers(p => ({ ...p, [currentQ.id]: e.target.value }))}
-                  style={{ resize: "vertical", fontSize: 14, borderRadius: 4 }}
-                />
-              )}
-
-              {/* Navigation */}
-              <div style={{ display: "flex", gap: 10, marginTop: 18, alignItems: "center", justifyContent: "space-between" }}>
-                <button
-                  className="btn btn-sm"
-                  onClick={handlePrev}
-                  disabled={currentIdx === 0}
-                  style={{ display: "flex", alignItems: "center", gap: 4, borderRadius: 4 }}
-                >
-                  <ChevronLeft size={13} /> ก่อนหน้า
-                </button>
-
-                {currentIdx === totalQ - 1 ? (
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleSubmit}
-                    style={{ display: "flex", alignItems: "center", gap: 5, borderRadius: 4 }}
-                  >
-                    <CheckCircle2 size={14} /> ส่งคำตอบ
-                  </button>
-                ) : (
-                  <button
-                    className="btn btn-primary btn-sm"
-                    onClick={handleNext}
-                    style={{ display: "flex", alignItems: "center", gap: 4, borderRadius: 4 }}
-                  >
-                    ถัดไป <ChevronRight size={13} />
-                  </button>
-                )}
-              </div>
+              <button className="btn btn-primary btn-sm w-full justify-center rounded" onClick={submit}>
+                <CheckCircle2 size={12} /> ส่งคำตอบ
+              </button>
             </div>
           )}
 
-          {/* Question Navigator */}
-          <div className="card" style={{ padding: "14px", borderRadius: 6 }}>
-            <p style={{ fontSize: 12, fontWeight: 700, marginBottom: 10, color: "var(--text-2)" }}>
-              เลือกข้อ
-            </p>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(4, 1fr)",
-              gap: 4,
-              marginBottom: 12,
-            }}>
-              {questions.map((q, i) => {
-                const isAnswered = !!answers[q.id]
-                const isCurrent = i === currentIdx
-                return (
-                  <button
-                    key={q.id}
-                    onClick={() => handleJump(i)}
-                    style={{
-                      width: "100%",
-                      aspectRatio: "1",
-                      borderRadius: 4,
-                      border: `2px solid ${isCurrent ? "var(--blue)" : isAnswered ? "var(--green)" : "var(--border)"}`,
-                      background: isCurrent ? "var(--blue)" : isAnswered ? "var(--green-light)" : "var(--surface)",
-                      color: isCurrent ? "#fff" : isAnswered ? "var(--green)" : "var(--text-3)",
-                      fontWeight: isCurrent || isAnswered ? 700 : 400,
-                      fontSize: 12,
-                      cursor: "pointer",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                    }}
-                  >
-                    {i + 1}
+          {/* Desktop: 2-column */}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_180px] gap-3 items-start">
+
+            {/* Question card */}
+            {currentQ && (
+              <div className="card rounded p-4 sm:p-5">
+                {/* Question header */}
+                <div className="flex items-center gap-2.5 mb-4">
+                  <div className="w-8 h-8 rounded bg-blue-600 text-white flex items-center justify-center text-sm font-extrabold shrink-0">
+                    {currentIdx + 1}
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-gray-400">ข้อที่ {currentIdx + 1} จาก {totalQ}</p>
+                    <p className="text-[11px] text-gray-400">
+                      {currentQ.type === "mcq" ? "ปรนัย" : currentQ.type === "fill" ? "เติมคำ" : "อัตนัย"} · {currentQ.points} คะแนน
+                    </p>
+                  </div>
+                </div>
+
+                <p className="text-base sm:text-[15px] font-semibold leading-relaxed mb-5">
+                  {currentQ.question_text}
+                </p>
+
+                {/* MCQ */}
+                {currentQ.type === "mcq" && currentQ.options && (
+                  <div className="flex flex-col gap-2.5">
+                    {(currentQ.options as QuizOption[]).map((opt, oi) => {
+                      const sel = answers[currentQ.id] === String(oi)
+                      return (
+                        <button key={oi} onClick={() => select(String(oi))}
+                          className={`flex items-center gap-3 p-3 rounded border-2 text-left transition-all cursor-pointer w-full
+                            ${sel ? "border-blue-500 bg-blue-50 text-blue-800 font-semibold" : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"}`}>
+                          <div className={`w-7 h-7 rounded shrink-0 flex items-center justify-center text-xs font-bold border
+                            ${sel ? "bg-blue-600 text-white border-blue-600" : "bg-gray-100 text-gray-500 border-gray-200"}`}>
+                            {opt.label}
+                          </div>
+                          <span className="text-sm">{opt.text}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Fill */}
+                {currentQ.type === "fill" && (
+                  <input
+                    className="input rounded text-base"
+                    placeholder="พิมพ์คำตอบ..."
+                    value={fillInput}
+                    onChange={e => { setFillInput(e.target.value); setAnswers(p => ({ ...p, [currentQ.id]: e.target.value })) }}
+                    autoFocus
+                  />
+                )}
+
+                {/* Essay */}
+                {currentQ.type === "essay" && (
+                  <textarea
+                    className="input rounded resize-y text-sm"
+                    rows={5}
+                    placeholder="เขียนคำตอบของคุณที่นี่..."
+                    value={answers[currentQ.id] ?? ""}
+                    onChange={e => setAnswers(p => ({ ...p, [currentQ.id]: e.target.value }))}
+                  />
+                )}
+
+                {/* Navigation (bottom of question card) */}
+                <div className="flex items-center justify-between mt-5">
+                  <button className="btn btn-sm rounded flex items-center gap-1" onClick={goPrev} disabled={currentIdx === 0}>
+                    <ChevronLeft size={13} /> ก่อนหน้า
                   </button>
-                )
-              })}
-            </div>
+                  {currentIdx === totalQ - 1 ? (
+                    <button className="btn btn-primary rounded flex items-center gap-1.5" onClick={submit}>
+                      <CheckCircle2 size={14} /> ส่งคำตอบ
+                    </button>
+                  ) : (
+                    <button className="btn btn-primary btn-sm rounded flex items-center gap-1" onClick={goNext}>
+                      ถัดไป <ChevronRight size={13} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
-            {/* Legend */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 5, fontSize: 11, color: "var(--text-3)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: "var(--blue)" }} />
-                ข้อปัจจุบัน
+            {/* Desktop: navigator sidebar */}
+            <div className="hidden lg:block card rounded p-3 sticky top-6">
+              <p className="text-xs font-bold mb-2.5 text-gray-500">เลือกข้อ</p>
+              <div className="grid grid-cols-4 gap-1 mb-3">
+                {questions.map((q, i) => {
+                  const isAns = !!answers[q.id]; const isCur = i === currentIdx
+                  return (
+                    <button key={q.id} onClick={() => jump(i)}
+                      className={`aspect-square rounded text-[11px] font-bold border transition-colors
+                        ${isCur ? "bg-blue-600 text-white border-blue-600"
+                          : isAns ? "bg-green-50 text-green-700 border-green-300"
+                          : "bg-white text-gray-400 border-gray-200 hover:border-gray-300"}`}>
+                      {i + 1}
+                    </button>
+                  )
+                })}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, background: "var(--green-light)", border: "1.5px solid var(--green)" }} />
-                ตอบแล้ว
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, border: "1.5px solid var(--border)" }} />
-                ยังไม่ตอบ
-              </div>
-            </div>
 
-            {/* Submit shortcut */}
-            <div style={{ borderTop: "1px solid var(--border)", marginTop: 12, paddingTop: 12 }}>
-              <p style={{ fontSize: 11, color: "var(--text-3)", marginBottom: 8 }}>
-                ตอบแล้ว {answeredCount}/{totalQ}
-              </p>
-              <button
-                className="btn btn-sm btn-primary"
-                style={{ width: "100%", justifyContent: "center", borderRadius: 4 }}
-                onClick={handleSubmit}
-              >
-                <CheckCircle2 size={11} /> ส่งคำตอบ
-              </button>
+              {/* Legend */}
+              <div className="flex flex-col gap-1.5 text-[11px] text-gray-500 mb-3">
+                {[
+                  { cls: "bg-blue-600", label: "ข้อปัจจุบัน" },
+                  { cls: "bg-green-50 border border-green-300", label: "ตอบแล้ว" },
+                  { cls: "bg-white border border-gray-200", label: "ยังไม่ตอบ" },
+                ].map(({ cls, label }) => (
+                  <div key={label} className="flex items-center gap-1.5">
+                    <div className={`w-3 h-3 rounded ${cls}`} />
+                    {label}
+                  </div>
+                ))}
+              </div>
+
+              <div className="border-t border-gray-100 pt-2.5">
+                <p className="text-[11px] text-gray-400 mb-2">ตอบแล้ว {answered}/{totalQ}</p>
+                <button className="btn btn-primary btn-sm w-full justify-center rounded" onClick={submit}>
+                  <CheckCircle2 size={11} /> ส่งคำตอบ
+                </button>
+              </div>
             </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   )

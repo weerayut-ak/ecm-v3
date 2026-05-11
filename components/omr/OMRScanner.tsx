@@ -9,7 +9,6 @@ interface Props {
   questions: Question[]
   onResult: (answers: Record<string, number>, serial?: string) => void
   onClose: () => void
-  /** true = โหมดสแกนบาร์โค้ดเพื่อดูประวัติเท่านั้น */
   barcodeOnlyMode?: boolean
   onBarcodeFound?: (serial: string) => void
 }
@@ -19,22 +18,42 @@ type ScanStep = 'camera' | 'preview' | 'processing' | 'result'
 interface DetectedAnswer {
   questionId: string
   questionNum: number
-  selectedOption: number   // 0=A,1=B,2=C,3=D,4=E, -1=ไม่ได้ฝน
+  selectedOption: number
   confidence: number
 }
 
-/* ── CSS Mobile-friendly ──────────────────────────────────────── */
+/* ── CSS ──────────────────────────────────────────────────────── */
 const SCANNER_CSS = `
+  /* ป้องกัน scroll ทั้งหน้าเมื่อ scanner เปิดอยู่ */
+  body.scanner-open { overflow: hidden; position: fixed; width: 100%; }
+
   .scanner-wrap {
-    position: fixed; inset: 0; background: #0f172a;
-    z-index: 9999; display: flex; flex-direction: column;
+    position: fixed; inset: 0;
+    background: #0f172a;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    /* ใช้ dvh แทน vh เพื่อรองรับ mobile browser bar */
+    height: 100dvh;
+    height: -webkit-fill-available;
     overflow: hidden;
+    /* รองรับ safe-area (notch/home indicator) */
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
+
   .scanner-header {
-    background: rgba(0,0,0,0.85); backdrop-filter: blur(12px);
-    padding: 10px 14px; display: flex; align-items: center;
-    gap: 10px; border-bottom: 1px solid rgba(255,255,255,0.1);
-    flex-shrink: 0; min-height: 54px;
+    background: rgba(0,0,0,0.9);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 10px 14px;
+    padding-top: max(10px, env(safe-area-inset-top));
+    display: flex; align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+    min-height: 54px;
   }
   .scanner-title { flex: 1; min-width: 0; }
   .scanner-title h3 {
@@ -46,84 +65,194 @@ const SCANNER_CSS = `
     margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .scanner-icon-btn {
-    width: 36px; height: 36px; border-radius: 50%;
+    width: 40px; height: 40px; border-radius: 50%;
     background: rgba(255,255,255,0.12); border: none;
-    color: white; cursor: pointer; font-size: 16px;
+    color: white; cursor: pointer; font-size: 18px;
     display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0; transition: background 0.15s;
+    flex-shrink: 0;
+    /* ขนาด tap target ที่ดีสำหรับมือถือ */
+    touch-action: manipulation;
   }
-  .scanner-icon-btn:hover { background: rgba(255,255,255,0.22); }
+
   .scanner-steps {
-    background: rgba(0,0,0,0.5); padding: 6px 14px;
-    display: flex; gap: 4px; flex-shrink: 0;
-    overflow-x: auto; scrollbar-width: none;
+    background: rgba(0,0,0,0.6);
+    padding: 6px 14px;
+    display: flex; gap: 4px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
   }
   .scanner-steps::-webkit-scrollbar { display: none; }
+
   .scanner-body {
-    flex: 1; overflow: hidden; display: flex; flex-direction: column;
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     position: relative;
+    /* ป้องกัน iOS overscroll */
+    overscroll-behavior: none;
   }
-  .scanner-body-scroll { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
 
-  .cam-corner { position: absolute; width: 18px; height: 18px; border-color: #60a5fa; border-style: solid; border-width: 0; }
-  .cam-corner.tl { top:-2px; left:-2px; border-top-width:3px; border-left-width:3px; border-radius:4px 0 0 0; }
-  .cam-corner.tr { top:-2px; right:-2px; border-top-width:3px; border-right-width:3px; border-radius:0 4px 0 0; }
-  .cam-corner.bl { bottom:-2px; left:-2px; border-bottom-width:3px; border-left-width:3px; border-radius:0 0 0 4px; }
-  .cam-corner.br { bottom:-2px; right:-2px; border-bottom-width:3px; border-right-width:3px; border-radius:0 0 4px 0; }
+  /* VIDEO ─ สำคัญมากสำหรับ iOS */
+  .scanner-video {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    /* บังคับให้ iOS ไม่แสดง fullscreen controls */
+    -webkit-playsinline: true;
+  }
 
+  /* Overlay กรอบ */
+  .scanner-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .scanner-frame {
+    position: relative;
+    border: 2px solid rgba(255,255,255,0.6);
+    border-radius: 12px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.45);
+  }
+
+  /* กรอบมุม */
+  .cam-corner {
+    position: absolute; width: 20px; height: 20px;
+    border-color: #60a5fa; border-style: solid; border-width: 0;
+  }
+  .cam-corner.tl { top:-2px; left:-2px; border-top-width:3px; border-left-width:3px; border-radius:5px 0 0 0; }
+  .cam-corner.tr { top:-2px; right:-2px; border-top-width:3px; border-right-width:3px; border-radius:0 5px 0 0; }
+  .cam-corner.bl { bottom:-2px; left:-2px; border-bottom-width:3px; border-left-width:3px; border-radius:0 0 0 5px; }
+  .cam-corner.br { bottom:-2px; right:-2px; border-bottom-width:3px; border-right-width:3px; border-radius:0 0 5px 0; }
+
+  /* แถบ scan animation */
+  .scan-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #60a5fa, transparent);
+    animation: scan-move 2s ease-in-out infinite;
+  }
+  @keyframes scan-move {
+    0%   { top: 10%; opacity: 0; }
+    10%  { opacity: 1; }
+    90%  { opacity: 1; }
+    100% { top: 90%; opacity: 0; }
+  }
+
+  /* ปุ่มถ่ายรูป */
   .capture-btn {
-    width: 68px; height: 68px; border-radius: 50%; background: white;
-    border: 4px solid rgba(255,255,255,0.45); cursor: pointer;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.45); transition: transform 0.1s;
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.95);
+    border: 4px solid rgba(255,255,255,0.4);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
     display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: transform 0.1s;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
-  .capture-btn:active { transform: scale(0.93); }
+  .capture-btn:active { transform: scale(0.9); }
+  .capture-btn-inner {
+    width: 54px; height: 54px;
+    border-radius: 50%;
+    background: #1e40af;
+  }
 
-  .scan-action-row {
-    display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
-    padding: 16px;
-  }
+  /* ปุ่มทั่วไป */
   .sbtn {
-    padding: 10px 22px; border-radius: 999px; border: none;
-    font-weight: 800; font-size: 13px; cursor: pointer;
-    transition: all 0.15s; display: flex; align-items: center; gap: 6px;
+    padding: 12px 22px; border-radius: 999px; border: none;
+    font-weight: 800; font-size: 14px; cursor: pointer;
+    display: flex; align-items: center; gap: 7px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: opacity 0.15s, transform 0.1s;
+    white-space: nowrap;
   }
-  .sbtn:active { transform: scale(0.96); }
-  .sbtn.ghost { background: rgba(255,255,255,0.13); color: white; }
-  .sbtn.ghost:hover { background: rgba(255,255,255,0.22); }
-  .sbtn.primary { background: #0050cb; color: white; box-shadow: 0 4px 14px rgba(0,80,203,0.4); }
-  .sbtn.primary:disabled { background: rgba(255,255,255,0.18); box-shadow: none; cursor: not-allowed; }
+  .sbtn:active { transform: scale(0.96); opacity: 0.85; }
+  .sbtn.ghost {
+    background: rgba(255,255,255,0.14); color: white;
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+  .sbtn.primary {
+    background: #0050cb; color: white;
+    box-shadow: 0 4px 16px rgba(0,80,203,0.45);
+  }
+  .sbtn.primary:disabled {
+    background: rgba(255,255,255,0.2);
+    box-shadow: none; cursor: not-allowed;
+  }
 
+  /* Error card */
+  .cam-error-card {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 20px;
+    padding: 28px 24px;
+    max-width: 320px;
+    text-align: center;
+  }
+
+  /* ManualReview */
   .review-serial-bar {
-    padding: 8px 14px; display: flex; align-items: center;
+    padding: 10px 14px;
+    display: flex; align-items: center;
     gap: 10px; flex-wrap: wrap; flex-shrink: 0;
   }
   .review-footer {
-    padding: 12px 14px; border-top: 1px solid var(--border, #e5e7eb);
+    padding: 12px 14px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border, #e5e7eb);
     display: flex; justify-content: space-between; align-items: center;
     gap: 10px; flex-shrink: 0; flex-wrap: wrap;
   }
   .manual-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
-    gap: 10px; padding: 12px 14px;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px; padding: 12px 14px;
   }
-  @media (max-width: 420px) {
+  .scanner-scroll {
+    flex: 1; overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  @media (max-width: 390px) {
+    .manual-grid { grid-template-columns: repeat(2, 1fr); gap: 6px; }
+    .sbtn { font-size: 13px; padding: 10px 16px; }
+    .scanner-title h3 { font-size: 13px; }
+  }
+  @media (max-width: 320px) {
     .manual-grid { grid-template-columns: 1fr; }
-    .scanner-title h3 { font-size: 12px; }
-    .sbtn { font-size: 12px; padding: 9px 16px; }
   }
+
+  /* Spinner */
   @keyframes omr-spin { to { transform: rotate(360deg); } }
+  .omr-spinner {
+    width: 48px; height: 48px; border-radius: 50%;
+    border: 4px solid rgba(255,255,255,0.2);
+    border-top-color: white;
+    animation: omr-spin 0.8s linear infinite;
+  }
 `
 
-/* ── OpenCV loader ──────────────────────────────────────────────── */
+/* ── OpenCV loader ────────────────────────────────────────────── */
 let cvReady = false
 let cvLoading = false
+
 function loadOpenCV(): Promise<void> {
   return new Promise(resolve => {
     if (cvReady) { resolve(); return }
     if (cvLoading) {
-      const t = setInterval(() => { if (cvReady) { clearInterval(t); resolve() } }, 100)
+      const t = setInterval(() => { if (cvReady) { clearInterval(t); resolve() } }, 150)
       return
     }
     cvLoading = true
@@ -132,59 +261,78 @@ function loadOpenCV(): Promise<void> {
     s.async = true
     s.onload = () => {
       // @ts-ignore
-      if (window.cv && window.cv.onRuntimeInitialized !== undefined) {
+      const tryInit = () => {
         // @ts-ignore
-        window.cv.onRuntimeInitialized = () => { cvReady = true; resolve() }
-      } else {
-        // @ts-ignore
-        const check = setInterval(() => {
-          // @ts-ignore
-          if (window.cv?.Mat) { clearInterval(check); cvReady = true; resolve() }
-        }, 200)
-        setTimeout(() => { clearInterval(check); cvReady = true; resolve() }, 15000)
+        const cv = window.cv
+        if (!cv) { setTimeout(tryInit, 200); return }
+        if (cv.Mat) { cvReady = true; resolve(); return } // already ready
+        cv.onRuntimeInitialized = () => { cvReady = true; resolve() }
+        // timeout fallback
+        setTimeout(() => { if (!cvReady) { cvReady = true; resolve() } }, 10000)
       }
+      tryInit()
     }
     s.onerror = () => { cvLoading = false; resolve() } // fail gracefully
     document.head.appendChild(s)
   })
 }
 
-/* ── Barcode detection ──────────────────────────────────────────── */
+/* ── Barcode detection ─────────────────────────────────────────── */
 async function detectBarcode(canvas: HTMLCanvasElement): Promise<string | null> {
-  try {
-    if ('BarcodeDetector' in window) {
+  // ลอง BarcodeDetector API (Chrome Android, iOS 17+, Edge)
+  if ('BarcodeDetector' in window) {
+    try {
       // @ts-ignore
-      const supported = await (window as any).BarcodeDetector.getSupportedFormats?.() ?? []
+      const supported: string[] = await (window as any).BarcodeDetector.getSupportedFormats?.() ?? []
+      const wanted = ['code_128','code_39','qr_code','ean_13','upc_a']
       const formats = supported.length > 0
-        ? (['code_128','code_39','qr_code','ean_13','upc_a'] as string[]).filter(f => supported.includes(f))
-        : ['code_128','code_39','qr_code']
+        ? wanted.filter(f => supported.includes(f))
+        : wanted
       // @ts-ignore
       const det = new (window as any).BarcodeDetector({ formats: formats.length ? formats : ['code_128','qr_code'] })
       const codes = await det.detect(canvas)
       if (codes.length > 0) return codes[0].rawValue as string
+    } catch { /* fallthrough */ }
+  }
+
+  // Fallback: ZXing-js (browser) สำหรับ Firefox / iOS Safari เก่า
+  try {
+    const ZXing = (window as any).ZXing
+    if (ZXing) {
+      const reader = new ZXing.BrowserMultiFormatReader()
+      const img = new Image()
+      img.src = canvas.toDataURL()
+      await new Promise<void>(r => { img.onload = () => r() })
+      const result = await reader.decodeFromImageElement(img).catch(() => null)
+      if (result) return result.text as string
     }
-  } catch { }
+  } catch { /* ignore */ }
+
   return null
 }
 
-/* ── Bubble detection ───────────────────────────────────────────── */
+/* ── Bubble detection (OpenCV.js) ─────────────────────────────── */
 async function detectBubbles(canvas: HTMLCanvasElement, questions: Question[]): Promise<DetectedAnswer[]> {
   await loadOpenCV()
   // @ts-ignore
   const cv = window.cv
+  if (!cv?.imread) throw new Error('OpenCV ไม่พร้อม')
+
   const mcqs = questions.filter(q => q.type === 'mcq')
-  const src = cv.imread(canvas)
+  const src  = cv.imread(canvas)
   const gray = new cv.Mat(); const thresh = new cv.Mat()
   const contours = new cv.MatVector(); const hierarchy = new cv.Mat()
+
   try {
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
     cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0)
-    cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 15, 8)
+    cv.adaptiveThreshold(gray, thresh, 255,
+      cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY_INV, 15, 8)
     cv.findContours(thresh, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
 
     const circles: { x: number; y: number; fill: number }[] = []
     for (let i = 0; i < contours.size(); i++) {
-      const cnt = contours.get(i)
+      const cnt  = contours.get(i)
       const area = cv.contourArea(cnt)
       const peri = cv.arcLength(cnt, true)
       if (peri > 0) {
@@ -193,34 +341,33 @@ async function detectBubbles(canvas: HTMLCanvasElement, questions: Question[]): 
           const m = cv.moments(cnt)
           if (m.m00 > 0) {
             const mask = cv.Mat.zeros(thresh.rows, thresh.cols, cv.CV_8UC1)
-            const cv2 = new cv.MatVector(); cv2.push_back(cnt)
-            cv.fillPoly(mask, cv2, new cv.Scalar(255))
+            const vec  = new cv.MatVector(); vec.push_back(cnt)
+            cv.fillPoly(mask, vec, new cv.Scalar(255))
             const mean = cv.mean(thresh, mask)
-            cv2.delete(); mask.delete()
-            circles.push({ x: m.m10/m.m00, y: m.m01/m.m00, fill: mean[0] })
+            vec.delete(); mask.delete()
+            circles.push({ x: m.m10 / m.m00, y: m.m01 / m.m00, fill: mean[0] })
           }
         }
       }
       cnt.delete()
     }
 
-    circles.sort((a,b) => Math.floor(a.y/20)-Math.floor(b.y/20) || a.x-b.x)
+    circles.sort((a, b) => Math.floor(a.y / 20) - Math.floor(b.y / 20) || a.x - b.x)
     const rows: typeof circles[] = []
     let lastY = -999
     circles.forEach(c => {
       if (Math.abs(c.y - lastY) > 15) { rows.push([]); lastY = c.y }
-      rows[rows.length-1].push(c)
+      rows[rows.length - 1].push(c)
     })
 
-    const FILL_THR = 80/255
     return mcqs.map((q, qi) => {
       const row = rows[qi]
-      if (!row?.length) return { questionId: q.id, questionNum: qi+1, selectedOption: -1, confidence: 0 }
+      if (!row?.length) return { questionId: q.id, questionNum: qi + 1, selectedOption: -1, confidence: 0 }
       const maxFill = Math.max(...row.map(c => c.fill))
-      const confidence = maxFill/255
+      const confidence = maxFill / 255
       return {
-        questionId: q.id, questionNum: qi+1,
-        selectedOption: confidence > FILL_THR ? row.findIndex(c => c.fill === maxFill) : -1,
+        questionId: q.id, questionNum: qi + 1,
+        selectedOption: confidence > 0.31 ? row.findIndex(c => c.fill === maxFill) : -1,
         confidence,
       }
     })
@@ -229,7 +376,7 @@ async function detectBubbles(canvas: HTMLCanvasElement, questions: Question[]): 
   }
 }
 
-/* ── ManualReview ───────────────────────────────────────────────── */
+/* ── ManualReview ─────────────────────────────────────────────── */
 function ManualReview({ questions, detected, detectedSerial, onConfirm, onBack }: {
   questions: Question[]
   detected: DetectedAnswer[]
@@ -237,86 +384,97 @@ function ManualReview({ questions, detected, detectedSerial, onConfirm, onBack }
   onConfirm: (answers: Record<string, number>, serial: string) => void
   onBack: () => void
 }) {
-  const mcqs = questions.filter(q => q.type === 'mcq')
+  const mcqs   = questions.filter(q => q.type === 'mcq')
+  const LABELS = ['A', 'B', 'C', 'D', 'E']
   const [answers, setAnswers] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {}
     detected.forEach(d => { if (d.selectedOption >= 0) init[d.questionId] = d.selectedOption })
     return init
   })
-  const [serial, setSerial] = useState(detectedSerial ?? '')
-  const LABELS = ['A','B','C','D','E']
+  const [serial, setSerial]   = useState(detectedSerial ?? '')
   const uncertain = (detected ?? []).filter(d => d.confidence < 0.5 || d.selectedOption < 0)
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--surface,#fff)' }}>
+
       {/* Serial bar */}
       <div className="review-serial-bar" style={{
         background: detectedSerial ? 'rgba(5,150,105,0.07)' : 'rgba(245,158,11,0.07)',
         borderBottom: `1px solid ${detectedSerial ? 'rgba(5,150,105,0.18)' : 'rgba(245,158,11,0.22)'}`,
       }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: detectedSerial ? '#059669' : '#d97706', whiteSpace: 'nowrap' }}>
-          {detectedSerial ? '🔢 รหัสกระดาษ:' : '⚠️ ไม่พบบาร์โค้ด — กรอกเอง:'}
+          {detectedSerial ? '🔢 รหัสกระดาษ:' : '⚠️ ไม่พบบาร์โค้ด:'}
         </span>
         <input
           value={serial}
           onChange={e => setSerial(e.target.value.toUpperCase().trim())}
-          placeholder="เช่น EX250001"
+          placeholder="กรอกรหัส เช่น R250001"
+          inputMode="text"
+          autoComplete="off"
           style={{
-            flex: 1, minWidth: 110, padding: '5px 10px', borderRadius: 8,
+            flex: 1, minWidth: 110, padding: '7px 10px', borderRadius: 8,
             border: `1.5px solid ${detectedSerial ? 'rgba(5,150,105,0.4)' : '#fbbf24'}`,
-            fontSize: 13, fontWeight: 800, fontFamily: 'monospace',
+            fontSize: 14, fontWeight: 800, fontFamily: 'monospace',
             background: 'white', color: '#111', letterSpacing: '0.06em',
+            WebkitAppearance: 'none',
           }}
         />
       </div>
 
       {uncertain.length > 0 && (
-        <div style={{ background: '#fef3c7', padding: '7px 14px', fontSize: 12, fontWeight: 600, color: '#92400e', flexShrink: 0 }}>
+        <div style={{ background: '#fef3c7', padding: '8px 14px', fontSize: 12, fontWeight: 600, color: '#92400e', flexShrink: 0 }}>
           ⚠️ พบ {uncertain.length} ข้อที่ไม่แน่ใจ — กรุณาตรวจสอบ
         </div>
       )}
 
-      <div className="scanner-body-scroll" style={{ flex: 1 }}>
+      {/* Answer grid */}
+      <div className="scanner-scroll">
         <div className="manual-grid">
           {mcqs.map((q, qi) => {
-            const det = detected[qi]
-            const opts = q.options ?? []
-            const uncertain = !det || det.confidence < 0.5 || det.selectedOption < 0
+            const det      = detected[qi]
+            const opts     = q.options ?? []
+            const isUncert = !det || det.confidence < 0.5 || det.selectedOption < 0
             return (
               <div key={q.id} style={{
-                padding: '10px 12px', borderRadius: 14,
-                border: `1.5px solid ${uncertain ? '#fbbf24' : 'var(--border,#e5e7eb)'}`,
-                background: uncertain ? '#fffbeb' : 'var(--surface-lowest,#f9fafb)',
+                padding: '10px', borderRadius: 12,
+                border: `1.5px solid ${isUncert ? '#fbbf24' : 'var(--border,#e5e7eb)'}`,
+                background: isUncert ? '#fffbeb' : 'var(--surface-lowest,#f9fafb)',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <span style={{
                     width: 22, height: 22, borderRadius: '50%', fontSize: 10, fontWeight: 800,
-                    background: uncertain ? '#fbbf24' : 'rgba(0,80,203,0.1)',
-                    color: uncertain ? 'white' : '#0050cb',
+                    background: isUncert ? '#fbbf24' : 'rgba(0,80,203,0.1)',
+                    color: isUncert ? 'white' : '#0050cb',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>{qi+1}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-3,#9ca3af)', fontWeight: 600 }}>
-                    {uncertain ? '⚠️ ต้องตรวจ' : `✓ ${Math.round((det?.confidence??0)*100)}%`}
+                  }}>{qi + 1}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text-3,#9ca3af)', fontWeight: 600 }}>
+                    {isUncert ? '⚠️ ตรวจ' : `✓ ${Math.round((det?.confidence ?? 0) * 100)}%`}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                   {opts.map((_, oi) => {
                     const sel = answers[q.id] === oi
                     return (
-                      <button key={oi} onClick={() => setAnswers(p => ({ ...p, [q.id]: oi }))} style={{
-                        width: 34, height: 34, borderRadius: '50%', fontSize: 12, fontWeight: 800,
-                        border: `2px solid ${sel ? '#0050cb' : 'var(--border,#e5e7eb)'}`,
-                        background: sel ? '#0050cb' : 'var(--surface,#fff)',
-                        color: sel ? 'white' : 'var(--text-2,#6b7280)',
-                        cursor: 'pointer', transition: 'all 0.12s',
-                      }}>{LABELS[oi]}</button>
+                      <button key={oi}
+                        onClick={() => setAnswers(p => ({ ...p, [q.id]: oi }))}
+                        style={{
+                          width: 36, height: 36, borderRadius: '50%', fontSize: 13, fontWeight: 800,
+                          border: `2px solid ${sel ? '#0050cb' : 'var(--border,#e5e7eb)'}`,
+                          background: sel ? '#0050cb' : 'var(--surface,#fff)',
+                          color: sel ? 'white' : 'var(--text-2,#6b7280)',
+                          cursor: 'pointer', touchAction: 'manipulation',
+                          WebkitTapHighlightColor: 'transparent',
+                        }}>{LABELS[oi]}</button>
                     )
                   })}
-                  <button onClick={() => setAnswers(p => { const n={...p}; delete n[q.id]; return n })} style={{
-                    padding: '4px 9px', borderRadius: 8, fontSize: 10, fontWeight: 700,
-                    border: '1.5px solid var(--border,#e5e7eb)', background: 'var(--surface,#fff)',
-                    color: 'var(--text-3,#9ca3af)', cursor: 'pointer',
-                  }}>ว่าง</button>
+                  <button
+                    onClick={() => setAnswers(p => { const n = { ...p }; delete n[q.id]; return n })}
+                    style={{
+                      padding: '5px 9px', borderRadius: 8, fontSize: 11, fontWeight: 700,
+                      border: '1.5px solid var(--border,#e5e7eb)', background: 'var(--surface,#fff)',
+                      color: 'var(--text-3,#9ca3af)', cursor: 'pointer',
+                      touchAction: 'manipulation',
+                    }}>ว่าง</button>
                 </div>
               </div>
             )
@@ -324,89 +482,196 @@ function ManualReview({ questions, detected, detectedSerial, onConfirm, onBack }
         </div>
       </div>
 
+      {/* Footer */}
       <div className="review-footer">
         <button onClick={onBack} style={{
-          padding: '9px 18px', borderRadius: 999,
+          padding: '10px 18px', borderRadius: 999,
           border: '1.5px solid var(--border,#e5e7eb)',
           background: 'var(--surface,#fff)', color: 'var(--text-2,#6b7280)',
-          fontWeight: 700, fontSize: 13, cursor: 'pointer',
+          fontWeight: 700, fontSize: 13, cursor: 'pointer', touchAction: 'manipulation',
         }}>← ถ่ายใหม่</button>
-        <span style={{ fontSize: 12, color: 'var(--text-3,#9ca3af)', textAlign: 'center', flex: 1 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-3,#9ca3af)', textAlign: 'center', flex: 1, minWidth: 60 }}>
           {Object.keys(answers).length}/{mcqs.length} ข้อ
-          {serial && <> · <span style={{ fontFamily:'monospace', fontWeight:700, color:'#0050cb' }}>#{serial}</span></>}
+          {serial && <><br /><span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#0050cb', fontSize: 11 }}>#{serial}</span></>}
         </span>
         <button onClick={() => onConfirm(answers, serial)} style={{
-          padding: '9px 20px', borderRadius: 999, border: 'none',
+          padding: '10px 18px', borderRadius: 999, border: 'none',
           background: '#0050cb', color: 'white',
-          fontWeight: 800, fontSize: 13, cursor: 'pointer',
-        }}>✓ ยืนยันและบันทึก</button>
+          fontWeight: 800, fontSize: 13, cursor: 'pointer', touchAction: 'manipulation',
+        }}>✓ บันทึก</button>
       </div>
     </div>
   )
 }
 
-/* ── Main Scanner ─────────────────────────────────────────────────── */
-export default function OMRScanner({ quiz, questions, onResult, onClose, barcodeOnlyMode=false, onBarcodeFound }: Props) {
+/* ── useCamera hook ────────────────────────────────────────────── */
+function useCamera(active: boolean, facingMode: 'environment' | 'user') {
   const videoRef  = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
+  const [ready,    setReady]    = useState(false)
+  const [error,    setError]    = useState<string | null>(null)
+  const [permDenied, setPermDenied] = useState(false)
 
-  const [step, setStep]            = useState<ScanStep>('camera')
-  const [capturedImg, setCaptured] = useState<string | null>(null)
-  const [detected, setDetected]    = useState<DetectedAnswer[]>([])
+  useEffect(() => {
+    if (!active) return
+    let cancelled = false
+    setReady(false); setError(null); setPermDenied(false)
+
+    async function startCamera() {
+      // หยุด stream เดิมก่อน
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+
+      // ตรวจสอบ API
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setError('browser ไม่รองรับกล้อง — ลองใช้ Chrome หรือ Safari')
+        return
+      }
+
+      // ลอง constraint ลำดับจากดีที่สุดไปหา fallback
+      const constraints: MediaStreamConstraints[] = [
+        // 1. กล้องหลัง HD
+        { video: { facingMode: { exact: facingMode }, width: { ideal: 1280 }, height: { ideal: 720 } } },
+        // 2. กล้องหลังไม่บังคับ resolution
+        { video: { facingMode } },
+        // 3. กล้องใดก็ได้
+        { video: true },
+      ]
+
+      let stream: MediaStream | null = null
+      let lastErr: Error | null = null
+
+      for (const c of constraints) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(c)
+          break
+        } catch (e: any) {
+          lastErr = e
+          if (e?.name === 'NotAllowedError' || e?.name === 'PermissionDeniedError') {
+            setPermDenied(true)
+            setError('ถูกปฏิเสธการใช้กล้อง — ไปที่ตั้งค่า browser แล้วอนุญาต')
+            return
+          }
+        }
+      }
+
+      if (!stream || cancelled) {
+        stream?.getTracks().forEach(t => t.stop())
+        if (!cancelled) setError(`เปิดกล้องไม่ได้: ${lastErr?.message ?? 'unknown'}`)
+        return
+      }
+
+      streamRef.current = stream
+      const video = videoRef.current
+      if (!video || cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+
+      // ── สำคัญมากสำหรับ iOS ──
+      video.srcObject  = stream
+      video.muted      = true
+      video.playsInline = true
+      video.setAttribute('playsinline', '')
+      video.setAttribute('webkit-playsinline', '')
+
+      try {
+        await video.play()
+        if (!cancelled) setReady(true)
+      } catch (playErr: any) {
+        // autoplay policy: ลองอีกครั้งหลัง user gesture
+        if (!cancelled) {
+          setError('กดปุ่มด้านล่างเพื่อเปิดกล้อง (autoplay ถูกบล็อก)')
+        }
+      }
+    }
+
+    startCamera()
+    return () => {
+      cancelled = true
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      setReady(false)
+    }
+  }, [active, facingMode])
+
+  const retryPlay = useCallback(async () => {
+    const video = videoRef.current
+    if (!video || !streamRef.current) return
+    try { await video.play(); setReady(true); setError(null) } catch { }
+  }, [])
+
+  const stop = useCallback(() => {
+    streamRef.current?.getTracks().forEach(t => t.stop())
+    streamRef.current = null
+  }, [])
+
+  return { videoRef, streamRef, ready, error, permDenied, retryPlay, stop }
+}
+
+/* ── Main Scanner ─────────────────────────────────────────────── */
+export default function OMRScanner({
+  quiz, questions, onResult, onClose,
+  barcodeOnlyMode = false, onBarcodeFound,
+}: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+
+  const [step, setStep]              = useState<ScanStep>('camera')
+  const [capturedImg, setCaptured]   = useState<string | null>(null)
+  const [detected, setDetected]      = useState<DetectedAnswer[]>([])
   const [detectedSerial, setDSerial] = useState<string | null>(null)
-  const [cvLoaded, setCvLoaded]    = useState(false)
-  const [facingMode, setFacing]    = useState<'environment'|'user'>('environment')
-  const [camError, setCamError]    = useState<string | null>(null)
+  const [cvLoaded, setCvLoaded]      = useState(false)
+  const [facingMode, setFacing]      = useState<'environment' | 'user'>('environment')
 
+  const cam = useCamera(step === 'camera', facingMode)
   const mcqs = questions.filter(q => q.type === 'mcq')
 
+  // lock body scroll เมื่อ scanner เปิด
+  useEffect(() => {
+    document.body.classList.add('scanner-open')
+    return () => document.body.classList.remove('scanner-open')
+  }, [])
+
+  // โหลด OpenCV ล่วงหน้า
   useEffect(() => {
     if (!barcodeOnlyMode) loadOpenCV().then(() => setCvLoaded(true))
   }, [barcodeOnlyMode])
 
-  useEffect(() => {
-    if (step !== 'camera') return
-    let active = true
-    const start = async () => {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode, width: { ideal: 1920 }, height: { ideal: 1080 } }
-        })
-        if (!active) { stream.getTracks().forEach(t => t.stop()); return }
-        streamRef.current = stream
-        if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(()=>{}) }
-        setCamError(null)
-      } catch {
-        setCamError('ไม่สามารถเข้าถึงกล้องได้ — กรุณาอนุญาตการใช้กล้อง')
-      }
-    }
-    start()
-    return () => { active = false; streamRef.current?.getTracks().forEach(t => t.stop()) }
-  }, [step, facingMode])
-
+  /* ── Capture ── */
   const capture = useCallback(() => {
-    const v = videoRef.current; const c = canvasRef.current
-    if (!v || !c) return
-    c.width = v.videoWidth || 1280; c.height = v.videoHeight || 720
-    c.getContext('2d')!.drawImage(v, 0, 0)
-    setCaptured(c.toDataURL('image/jpeg', 0.92))
-    streamRef.current?.getTracks().forEach(t => t.stop())
+    const video  = cam.videoRef.current
+    const canvas = canvasRef.current
+    if (!video || !canvas) return
+
+    const w = video.videoWidth  || 1280
+    const h = video.videoHeight || 720
+    canvas.width  = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')!
+    ctx.drawImage(video, 0, 0, w, h)
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.9)
+    setCaptured(dataUrl)
+    cam.stop()
     setStep('preview')
-  }, [])
+  }, [cam])
 
+  /* ── Back to camera ── */
   const goBackToCamera = useCallback(() => {
-    setCaptured(null); setDetected([]); setDSerial(null); setStep('camera')
+    setCaptured(null); setDetected([]); setDSerial(null)
+    setStep('camera')
   }, [])
 
+  /* ── Process image ── */
   const processImage = useCallback(async () => {
     if (!capturedImg || !canvasRef.current) return
     setStep('processing')
+
     try {
-      const img = new Image(); img.src = capturedImg
+      const img = new Image()
+      img.src = capturedImg
       await new Promise<void>(r => { img.onload = () => r() })
+
       const canvas = canvasRef.current!
-      canvas.width = img.width; canvas.height = img.height
+      canvas.width  = img.naturalWidth  || img.width
+      canvas.height = img.naturalHeight || img.height
       canvas.getContext('2d')!.drawImage(img, 0, 0)
 
       if (barcodeOnlyMode) {
@@ -414,7 +679,6 @@ export default function OMRScanner({ quiz, questions, onResult, onClose, barcode
         if (val) {
           toast.success(`พบรหัส: ${val}`)
           onBarcodeFound?.(val)
-          // รีเซ็ตสถานะเพื่อให้สแกนซ้ำได้
           goBackToCamera()
         } else {
           toast.error('ไม่พบบาร์โค้ด — ลองถ่ายใหม่ให้ชัดขึ้น')
@@ -423,128 +687,225 @@ export default function OMRScanner({ quiz, questions, onResult, onClose, barcode
         return
       }
 
-      const [bubbles, barcode] = await Promise.all([detectBubbles(canvas, questions), detectBarcode(canvas)])
+      const [bubbles, barcode] = await Promise.all([
+        detectBubbles(canvas, questions),
+        detectBarcode(canvas),
+      ])
+
       setDetected(bubbles)
       setDSerial(barcode)
       if (barcode) toast.success(`พบรหัสกระดาษ: ${barcode}`)
       else toast('ไม่พบบาร์โค้ด — กรอกรหัสเองได้', { icon: 'ℹ️' })
       setStep('result')
-    } catch (err) {
+    } catch (err: any) {
       console.error(err)
-      toast.error('ตรวจไม่สำเร็จ ลองถ่ายใหม่')
+      toast.error('ตรวจไม่สำเร็จ: ' + (err?.message ?? 'ลองถ่ายใหม่'))
       setStep('preview')
     }
-  }, [capturedImg, questions, barcodeOnlyMode, onBarcodeFound])
+  }, [capturedImg, questions, barcodeOnlyMode, onBarcodeFound, goBackToCamera])
 
-  const STEPS: ScanStep[] = ['camera','preview','processing','result']
-  const LABELS_STEP = ['ถ่ายรูป','ตรวจสอบ','ประมวลผล','ผลลัพธ์']
+  /* ── Steps ── */
+  const STEPS: ScanStep[]  = ['camera', 'preview', 'processing', 'result']
+  const STEP_TH            = ['ถ่ายรูป', 'ตรวจสอบ', 'ประมวลผล', 'ผลลัพธ์']
+  const currentIdx         = STEPS.indexOf(step)
 
   return (
     <div className="scanner-wrap">
       <style>{SCANNER_CSS}</style>
 
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="scanner-header">
-        <button className="scanner-icon-btn" onClick={onClose}>✕</button>
+        <button className="scanner-icon-btn" onClick={onClose} aria-label="ปิด">✕</button>
         <div className="scanner-title">
-          <h3>{barcodeOnlyMode ? '🔍 สแกนบาร์โค้ดดูประวัติ' : '📷 สแกนกระดาษคำตอบ'}</h3>
+          <h3>{barcodeOnlyMode ? '🔍 สแกนบาร์โค้ด' : '📷 สแกนกระดาษคำตอบ'}</h3>
           <p>{quiz.title}{!barcodeOnlyMode && ` · ${mcqs.length} ข้อ`}</p>
         </div>
+
         {!barcodeOnlyMode && (
-          <div style={{ display:'flex', alignItems:'center', gap:5, flexShrink:0 }}>
-            <span style={{ width:8, height:8, borderRadius:'50%', background:cvLoaded?'#22c55e':'#f59e0b', display:'inline-block' }} />
-            <span style={{ color:'rgba(255,255,255,0.5)', fontSize:10, whiteSpace:'nowrap' }}>
-              {cvLoaded ? 'OpenCV พร้อม' : 'โหลด...'}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: '50%', display: 'inline-block',
+              background: cvLoaded ? '#22c55e' : '#f59e0b',
+            }} />
+            <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10, whiteSpace: 'nowrap' }}>
+              {cvLoaded ? 'OpenCV ✓' : 'โหลด...'}
             </span>
           </div>
         )}
+
         {step === 'camera' && (
-          <button onClick={() => setFacing(f => f==='environment'?'user':'environment')} style={{
-            background:'rgba(255,255,255,0.15)', border:'none', color:'white',
-            padding:'6px 11px', borderRadius:8, cursor:'pointer', fontSize:12, fontWeight:700, flexShrink:0,
-          }}>🔄</button>
+          <button
+            onClick={() => setFacing(f => f === 'environment' ? 'user' : 'environment')}
+            className="scanner-icon-btn"
+            aria-label="สลับกล้อง"
+            style={{ fontSize: 16 }}
+          >🔄</button>
         )}
       </div>
 
-      {/* Steps */}
+      {/* ── Step indicator ── */}
       <div className="scanner-steps">
         {STEPS.map((s, i) => (
-          <div key={s} style={{ display:'flex', alignItems:'center', gap:4, flexShrink:0 }}>
+          <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
             <div style={{
-              width:20, height:20, borderRadius:'50%', fontSize:10, fontWeight:800,
-              display:'flex', alignItems:'center', justifyContent:'center',
-              background: step===s ? '#0050cb' : STEPS.indexOf(step)>i ? '#22c55e' : 'rgba(255,255,255,0.15)',
-              color:'white',
-            }}>{i+1}</div>
-            <span style={{ fontSize:10, color:step===s?'white':'rgba(255,255,255,0.4)', whiteSpace:'nowrap' }}>{LABELS_STEP[i]}</span>
-            {i<3 && <span style={{ color:'rgba(255,255,255,0.2)', fontSize:12 }}>›</span>}
+              width: 20, height: 20, borderRadius: '50%', fontSize: 10, fontWeight: 800,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: step === s ? '#0050cb' : i < currentIdx ? '#22c55e' : 'rgba(255,255,255,0.15)',
+              color: 'white',
+            }}>{i < currentIdx ? '✓' : i + 1}</div>
+            <span style={{ fontSize: 10, color: step === s ? 'white' : 'rgba(255,255,255,0.4)', whiteSpace: 'nowrap' }}>
+              {STEP_TH[i]}
+            </span>
+            {i < 3 && <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12 }}>›</span>}
           </div>
         ))}
       </div>
 
+      {/* ── Body ── */}
       <div className="scanner-body">
 
         {/* CAMERA */}
         {step === 'camera' && (
-          <div style={{ flex:1, position:'relative', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', overflow:'hidden' }}>
-            {camError ? (
-              <div style={{ textAlign:'center', color:'white', padding:24 }}>
-                <div style={{ fontSize:40, marginBottom:12 }}>📷</div>
-                <p style={{ fontSize:14, marginBottom:16, color:'rgba(255,255,255,0.8)', lineHeight:1.5 }}>{camError}</p>
-                <button onClick={() => { setCamError(null) }} style={{
-                  padding:'10px 24px', borderRadius:999, background:'#0050cb',
-                  color:'white', border:'none', fontWeight:700, cursor:'pointer',
-                }}>ลองอีกครั้ง</button>
-              </div>
-            ) : (
-              <>
-                <video ref={videoRef} autoPlay playsInline muted style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
-                <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-                  <div style={{
-                    width:'88%',
+          <div style={{ position: 'relative', flex: 1, background: '#000', overflow: 'hidden' }}>
+
+            {/* Video element — ต้องอยู่ใน DOM ตลอดเวลาเพื่อให้ iOS ทำงาน */}
+            <video
+              ref={cam.videoRef}
+              className="scanner-video"
+              autoPlay
+              playsInline
+              muted
+              // @ts-ignore — webkit-playsinline สำหรับ iOS เก่า
+              webkit-playsinline="true"
+            />
+
+            {/* กรอบ overlay */}
+            {cam.ready && (
+              <div className="scanner-overlay">
+                <div
+                  className="scanner-frame"
+                  style={{
+                    width: '88%',
                     aspectRatio: barcodeOnlyMode ? '3.5/1' : '1.41/1',
-                    border:'2px solid rgba(255,255,255,0.55)',
-                    borderRadius:10,
-                    boxShadow:'0 0 0 9999px rgba(0,0,0,0.38)',
-                    position:'relative',
-                  }}>
-                    <div className="cam-corner tl" /><div className="cam-corner tr" />
-                    <div className="cam-corner bl" /><div className="cam-corner br" />
-                    {barcodeOnlyMode && (
-                      <div style={{
-                        position:'absolute', inset:'35% 0',
-                        background:'rgba(96,165,250,0.12)',
-                        borderTop:'1.5px solid rgba(96,165,250,0.55)',
-                        borderBottom:'1.5px solid rgba(96,165,250,0.55)',
-                      }} />
-                    )}
-                  </div>
+                  }}
+                >
+                  <div className="cam-corner tl" /><div className="cam-corner tr" />
+                  <div className="cam-corner bl" /><div className="cam-corner br" />
+                  <div className="scan-line" />
+                  {barcodeOnlyMode && (
+                    <div style={{
+                      position: 'absolute', inset: '30% 0', pointerEvents: 'none',
+                      background: 'rgba(96,165,250,0.1)',
+                      borderTop: '2px solid rgba(96,165,250,0.7)',
+                      borderBottom: '2px solid rgba(96,165,250,0.7)',
+                    }} />
+                  )}
                 </div>
-                <div style={{ position:'absolute', bottom:0, left:0, right:0, padding:'14px 20px 20px', background:'linear-gradient(transparent,rgba(0,0,0,0.68))' }}>
-                  <p style={{ color:'rgba(255,255,255,0.75)', fontSize:12, textAlign:'center', marginBottom:14 }}>
-                    {barcodeOnlyMode ? 'จัดบาร์โค้ดให้อยู่ในแถบสีน้ำเงิน' : 'จัดกระดาษให้อยู่ในกรอบ · บาร์โค้ดจะสแกนอัตโนมัติ'}
-                  </p>
-                  <div style={{ display:'flex', justifyContent:'center' }}>
-                    <button className="capture-btn" onClick={capture}>
-                      <div style={{ width:50, height:50, borderRadius:'50%', background:'#1e40af' }} />
-                    </button>
-                  </div>
-                </div>
-              </>
+              </div>
             )}
+
+            {/* Loading / Error state */}
+            {!cam.ready && !cam.error && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                display: 'flex', flexDirection: 'column',
+                alignItems: 'center', justifyContent: 'center', gap: 14,
+                color: 'white',
+              }}>
+                <div className="omr-spinner" />
+                <p style={{ fontSize: 14, fontWeight: 600 }}>กำลังเปิดกล้อง...</p>
+              </div>
+            )}
+
+            {cam.error && (
+              <div style={{
+                position: 'absolute', inset: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 24,
+              }}>
+                <div className="cam-error-card">
+                  <div style={{ fontSize: 44, marginBottom: 14 }}>📷</div>
+                  <p style={{ color: 'white', fontWeight: 700, fontSize: 15, marginBottom: 8, lineHeight: 1.4 }}>
+                    {cam.permDenied ? 'ถูกปฏิเสธการใช้กล้อง' : 'เปิดกล้องไม่ได้'}
+                  </p>
+                  <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, marginBottom: 20, lineHeight: 1.5 }}>
+                    {cam.error}
+                  </p>
+                  {cam.permDenied ? (
+                    <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, lineHeight: 1.6 }}>
+                      วิธีแก้:<br />
+                      iOS: ตั้งค่า → Safari → กล้อง → อนุญาต<br />
+                      Android: ตั้งค่า → แอป → Chrome → กล้อง → อนุญาต
+                    </p>
+                  ) : (
+                    <button
+                      onClick={cam.retryPlay}
+                      style={{
+                        padding: '11px 28px', borderRadius: 999,
+                        background: '#0050cb', color: 'white',
+                        border: 'none', fontWeight: 700, fontSize: 14,
+                        cursor: 'pointer', touchAction: 'manipulation',
+                      }}
+                    >
+                      ลองอีกครั้ง
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ปุ่มถ่ายรูป + hint */}
+            <div style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0,
+              padding: '16px 20px 24px',
+              background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+              display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+            }}>
+              <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, textAlign: 'center', margin: 0, lineHeight: 1.5 }}>
+                {barcodeOnlyMode
+                  ? 'จัดบาร์โค้ดให้อยู่ในแถบ · กดปุ่มเพื่อถ่ายภาพ'
+                  : 'จัดกระดาษให้อยู่ในกรอบ · ถ่ายให้ตรงและชัดเจน'}
+              </p>
+              <button
+                className="capture-btn"
+                onClick={cam.ready ? capture : cam.retryPlay}
+                aria-label={cam.ready ? 'ถ่ายรูป' : 'เปิดกล้อง'}
+              >
+                <div className="capture-btn-inner" style={{ background: cam.ready ? '#1e40af' : '#6b7280' }} />
+              </button>
+              {!cam.ready && !cam.error && (
+                <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>รอกล้องพร้อม...</p>
+              )}
+            </div>
           </div>
         )}
 
         {/* PREVIEW */}
         {step === 'preview' && capturedImg && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', padding:16, overflowY:'auto', gap:16 }}>
-            <img src={capturedImg} alt="ภาพที่ถ่าย" style={{
-              maxWidth:'100%', maxHeight:'calc(100dvh - 240px)',
-              objectFit:'contain', borderRadius:10, boxShadow:'0 8px 30px rgba(0,0,0,0.5)',
-            }} />
-            <div className="scan-action-row" style={{ padding:0 }}>
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            padding: 16, gap: 16, overflowY: 'auto',
+            background: '#1e293b',
+          }}>
+            <img
+              src={capturedImg}
+              alt="ภาพที่ถ่าย"
+              style={{
+                maxWidth: '100%',
+                maxHeight: 'calc(100dvh - 220px)',
+                objectFit: 'contain',
+                borderRadius: 12,
+                boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+              }}
+            />
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
               <button className="sbtn ghost" onClick={goBackToCamera}>↩ ถ่ายใหม่</button>
-              <button className="sbtn primary" onClick={processImage} disabled={!barcodeOnlyMode && !cvLoaded}>
+              <button
+                className="sbtn primary"
+                onClick={processImage}
+                disabled={!barcodeOnlyMode && !cvLoaded}
+              >
                 {barcodeOnlyMode ? '🔍 สแกนบาร์โค้ด' : cvLoaded ? '🔍 ตรวจคำตอบ' : '⏳ รอ OpenCV...'}
               </button>
             </div>
@@ -553,36 +914,44 @@ export default function OMRScanner({ quiz, questions, onResult, onClose, barcode
 
         {/* PROCESSING */}
         {step === 'processing' && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:16, color:'white', padding:24 }}>
-            <div style={{ width:48, height:48, borderRadius:'50%', border:'4px solid rgba(255,255,255,0.2)', borderTopColor:'white', animation:'omr-spin 0.8s linear infinite' }} />
-            <p style={{ fontSize:15, fontWeight:600, textAlign:'center' }}>
-              {barcodeOnlyMode ? 'กำลังอ่านบาร์โค้ด...' : 'กำลังตรวจคำตอบและอ่านรหัสกระดาษ...'}
-            </p>
-            <p style={{ fontSize:12, color:'rgba(255,255,255,0.5)', textAlign:'center' }}>
-              {barcodeOnlyMode ? 'BarcodeDetector API' : 'OpenCV.js + BarcodeDetector กำลังประมวลผล'}
-            </p>
+          <div style={{
+            flex: 1, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: 18, padding: 32, color: 'white',
+          }}>
+            <div className="omr-spinner" />
+            <div style={{ textAlign: 'center' }}>
+              <p style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>
+                {barcodeOnlyMode ? 'กำลังอ่านบาร์โค้ด...' : 'กำลังตรวจคำตอบ...'}
+              </p>
+              <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
+                {barcodeOnlyMode ? 'BarcodeDetector API' : 'OpenCV.js กำลังวิเคราะห์ภาพ'}
+              </p>
+            </div>
           </div>
         )}
 
         {/* RESULT */}
         {step === 'result' && !barcodeOnlyMode && (
-          <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <div style={{
-              padding:'8px 14px', background:'var(--surface-lowest,#f9fafb)',
-              borderBottom:'1px solid var(--border,#e5e7eb)',
-              flexShrink:0, display:'flex', alignItems:'center', gap:8,
+              padding: '8px 14px', flexShrink: 0,
+              background: 'var(--surface-lowest,#f9fafb)',
+              borderBottom: '1px solid var(--border,#e5e7eb)',
+              display: 'flex', alignItems: 'center', gap: 8,
             }}>
               <button onClick={goBackToCamera} style={{
-                padding:'5px 12px', borderRadius:999,
-                border:'1.5px solid var(--border,#e5e7eb)',
-                background:'var(--surface,#fff)', color:'var(--text-2,#6b7280)',
-                fontWeight:700, fontSize:12, cursor:'pointer',
+                padding: '6px 14px', borderRadius: 999,
+                border: '1.5px solid var(--border,#e5e7eb)',
+                background: 'var(--surface,#fff)', color: 'var(--text-2,#6b7280)',
+                fontWeight: 700, fontSize: 12, cursor: 'pointer',
+                touchAction: 'manipulation',
               }}>← ถ่ายใหม่</button>
-              <span style={{ fontSize:12, fontWeight:700, color:'var(--text-2,#374151)' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>
                 ✓ ตรวจเสร็จ — ตรวจสอบก่อนบันทึก
               </span>
             </div>
-            <div style={{ flex:1, overflow:'hidden' }}>
+            <div style={{ flex: 1, overflow: 'hidden' }}>
               <ManualReview
                 questions={questions}
                 detected={detected}
@@ -595,7 +964,7 @@ export default function OMRScanner({ quiz, questions, onResult, onClose, barcode
         )}
       </div>
 
-      <canvas ref={canvasRef} style={{ display:'none' }} />
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
   )
 }

@@ -110,11 +110,27 @@ export default function StudentsClient({ students: init }: { students: StudentWi
     grade: g, count: students.filter(s => s.grade?.startsWith(g)).length,
   }))
 
-  async function handleDelete(id: string) {
+  // ตัวอย่างการแก้ฟังก์ชันลบ ให้ยิงไปที่ API ที่เราเพิ่งสร้าง
+  async function handleDelete(studentId: string) {
     if (!confirm('ยืนยันการลบนักเรียนคนนี้?')) return
-    await supabase.from('profiles').delete().eq('id', id)
-    setStudents(p => p.filter(s => s.id !== id))
-    toast.success('ลบแล้ว')
+    
+    try {
+      const res = await fetch('/api/admin/delete-student', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: studentId })
+      })
+      
+      if (res.ok) {
+        toast.success('ลบนักเรียนสำเร็จ')
+        router.refresh() // รีเฟรชหน้าเว็บให้ข้อมูลหายไป
+      } else {
+        const data = await res.json()
+        toast.error(data.error || 'ลบไม่สำเร็จ')
+      }
+    } catch (error) {
+      toast.error('เกิดข้อผิดพลาดในการเชื่อมต่อ')
+    }
   }
 
   async function handleSave(form: Partial<Profile>, email?: string, password?: string) {

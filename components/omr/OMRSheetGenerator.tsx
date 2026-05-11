@@ -20,7 +20,6 @@ function loadScript(src: string): Promise<void> {
 async function loadPDFLibs() {
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js')
   await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js')
-  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js')
 }
 
 // ─── A4 @96 dpi ───────────────────────────────────────────────────────────────
@@ -61,33 +60,51 @@ function genSerial(prefix: string, year: number, seq: number) {
   return `${prefix}${String(year).slice(-2)}${String(seq).padStart(4,'0')}`
 }
 
-// ─── Barcode on <canvas> — html2canvas captures canvas pixel-perfectly ────────
-function BarcodeCanvas({ value, w, h }: { value: string; w: number; h: number }) {
-  const ref = useRef<HTMLImageElement>(null)
+// ─── QR Code — dynamic import 'qrcode' (npm) ────────────────────────────────
+// ติดตั้งก่อน: npm install qrcode @types/qrcode
+function QRCodeCanvas({ value, size }: { value: string; size: number }) {
+  const [dataUrl, setDataUrl] = useState<string>('')
+
   useEffect(() => {
-    if (!ref.current || !value) return
-    const attempt = () => {
-      const JsB = (window as any).JsBarcode
-      if (!JsB) { setTimeout(attempt, 80); return }
-      try {
-        JsB(ref.current, value, {
-          format: 'CODE128', 
-          width: 4,             
-          height: (h - 20) * 3, 
-          displayValue: true, 
-          fontSize: 32,         
-          fontOptions: 'bold',
-          margin: 10, 
-          background: '#ffffff', 
-          lineColor: '#000000',
-          textMargin: 8, 
-          font: 'monospace',
-        })
-      } catch { /* ignore */ }
-    }
-    attempt()
-  }, [value, w, h])
-  return <img ref={ref} style={{ width:w, height:h, display:'block', objectFit:'contain' }} alt="barcode"/>
+    if (!value) return
+    let cancelled = false
+    // dynamic import ทำงานได้ทั้ง server และ client ใน Next.js
+    import('qrcode').then(QRCode => {
+      if (cancelled) return
+      return QRCode.toDataURL(value, {
+        width: size * 2,      // 192px — ความละเอียดดี สแกนได้ง่าย
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' },
+        errorCorrectionLevel: 'M',
+      })
+    }).then(url => {
+      if (!cancelled && url) setDataUrl(url as string)
+    }).catch(err => {
+      console.warn('QR Code error:', err)
+    })
+    return () => { cancelled = true }
+  }, [value, size])
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:3,
+      background:'white', padding:'4px 4px 2px' }}>
+      {dataUrl
+        ? <img
+            src={dataUrl}
+            style={{ width:size, height:size, display:'block', imageRendering:'pixelated' }}
+            alt={`QR:${value}`}
+          />
+        : <div style={{ width:size, height:size, background:'#f3f0ff', border:'1px solid #c4b5fd',
+            borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
+            fontSize:8, color:'#9ca3af' }}>QR…</div>
+      }
+      <span style={{ fontFamily:'monospace', fontSize:8, fontWeight:800, color:'#5a1a9e',
+        letterSpacing:'0.04em', textAlign:'center',
+        maxWidth:size, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+        {value}
+      </span>
+    </div>
+  )
 }
 
 // ─── Digit Column ─────────────────────────────────────────────────────────────
@@ -393,7 +410,7 @@ function OMRSheetInner({ quiz, questions, copyNum, totalCopies,
 
             {/* ── Barcode ── (ต่อจากชุดที่) */}
             <div style={{ marginTop:2 }}>
-              <BarcodeCanvas value={serial} w={LEFT_W} h={56} />
+              <QRCodeCanvas value={serial} size={96} />
             </div>
 
           </div>{/* end LEFT PANEL */}
@@ -574,15 +591,117 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
     setLoadingHistory(false)
   }
 
+  // ── ลบ batch ──────────────────────────────────────────────────
+  const deleteBatch = async (batchId: string) => {
+    if (!window.confirm('ลบประวัตินี้ใช่ไหม?')) return
+    const { error } = await supabase.from('omr_sheet_batches').delete().eq('id', batchId)
+    if (!error) {
+      setBatches(prev => prev.filter(b => b.id !== batchId))
+      if (expandedBatch === batchId) setExpandedBatch(null)
+    } else {
+      alert('ลบไม่สำเร็จ: ' + error.message)
+    }
+  }
+
+  // ── โหลด PDF ย้อนหลังจากประวัติ ─────────────────────────────
+  const [downloadingBatch, setDownloadingBatch] = useState<string | null>(null)
+
+  const downloadBatchPDF = async (b: SheetBatch) => {
+    if (downloadingBatch) return
+    setDownloadingBatch(b.id)
+
+    const batchQuiz: Quiz = { id: b.exam_id ?? '1', title: b.exam_title, pass_score: 60, time_limit: 60 }
+    const batchOpt = b.options_per_q
+    const batchQuestions: Question[] = DEMO_Q.slice(0, Math.min(b.num_questions, 60)).map(q => ({
+      ...q,
+      correct_answer: String(parseInt(q.correct_answer, 10) % batchOpt),
+      options: Array.from({ length: batchOpt }, (_, i) => ({ label: LABELS[i] })),
+    }))
+    const batchMeta: TeacherMeta = {
+      subject: '', subjectCode: b.subject_code,
+      examDate: '', examTime: '', examDuration: '', room: '', note: '',
+    }
+
+    const overlay = document.createElement('div')
+    overlay.style.cssText = [
+      'position:fixed','inset:0','z-index:10001',
+      'background:#0f0720',
+      'display:flex','flex-direction:column',
+      'align-items:center','justify-content:center','gap:12px',
+    ].join(';')
+    overlay.innerHTML = `
+      <div style="color:#e9d5ff;font-size:16px;font-weight:800;font-family:sans-serif">⏳ กำลังเตรียม PDF…</div>
+      <div style="width:260px;height:6px;background:#2d1050;border-radius:4px;overflow:hidden">
+        <div id="omr-ol-bar2" style="height:100%;width:30%;background:linear-gradient(90deg,#6b21a8,#a855f7);transition:width 0.3s;border-radius:4px"></div>
+      </div>
+      <div style="color:#c4b5fd;font-size:11px;font-family:sans-serif;margin-top:10px;text-align:center;line-height:1.7">
+        เมื่อหน้าต่างพิมพ์ปรากฏ<br>เลือก <b style="color:#e9d5ff">บันทึกเป็น PDF</b> แล้วกด Save
+      </div>
+    `
+    document.body.appendChild(overlay)
+
+    const printStyle = document.createElement('style')
+    printStyle.id = 'omr-print-style'
+    printStyle.textContent = `
+      #omr-print-root { display:none; }
+      @media print {
+        body > *:not(#omr-print-root) { display:none !important; }
+        #omr-print-root { display:block !important; margin:0; padding:0; }
+        @page { size:A4 portrait; margin:0; }
+        .omr-sheet-page {
+          width:794px; height:1123px; page-break-after:always; overflow:hidden;
+          -webkit-print-color-adjust:exact !important; print-color-adjust:exact !important;
+        }
+        .omr-sheet-page:last-child { page-break-after:avoid; }
+      }
+    `
+    document.head.appendChild(printStyle)
+
+    const printRoot = document.createElement('div')
+    printRoot.id = 'omr-print-root'
+    document.body.appendChild(printRoot)
+
+    try {
+      const { createRoot } = await import('react-dom/client')
+      const root = createRoot(printRoot)
+      await new Promise<void>(res => {
+        root.render(
+          <>
+            {b.serials.map((serial, ci) => (
+              <div key={ci} className="omr-sheet-page">
+                <OMRSheetInner
+                  quiz={batchQuiz} questions={batchQuestions}
+                  copyNum={ci + 1} totalCopies={b.copies}
+                  showAnswerKey={false}
+                  schoolName={b.school} subtitle=""
+                  serial={serial} optCount={batchOpt} meta={batchMeta}
+                />
+              </div>
+            ))}
+          </>
+        )
+        requestAnimationFrame(() => document.fonts.ready.then(() => setTimeout(res, 1500)))
+      })
+      document.body.removeChild(overlay)
+      window.print()
+      root.unmount()
+    } catch (err) {
+      console.error(err); alert('เกิดข้อผิดพลาด:\n' + String(err))
+      if (document.body.contains(overlay)) document.body.removeChild(overlay)
+    } finally {
+      document.getElementById('omr-print-root')?.remove()
+      document.getElementById('omr-print-style')?.remove()
+      setDownloadingBatch(null)
+    }
+  }
+
   const toggleHistory = () => {
     const next = !showHistory
     setShowHistory(next)
     if (next) loadHistory()
   }
 
-  useEffect(()=>{
-    loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js').catch(()=>{})
-  },[])
+
   useEffect(()=>{
     if (typeof ResizeObserver==='undefined'||!contRef.current) return
     const ro=new ResizeObserver(e=>{ if(e[0]) setContW(e[0].contentRect.width) })
@@ -653,8 +772,7 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
     document.body.appendChild(printRoot)
 
     try {
-      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js')
-      const {createRoot} = await import('react-dom/client')
+          const {createRoot} = await import('react-dom/client')
       setProgress(30); setOL(30)
 
       const root = createRoot(printRoot)
@@ -673,8 +791,8 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
             })}
           </>
         )
-        // รอ font + barcode (JsBarcode polls ทุก 80ms) render เสร็จ
-        requestAnimationFrame(() => document.fonts.ready.then(() => setTimeout(res, 700)))
+        // รอ font + QR Code render เสร็จ
+        requestAnimationFrame(() => document.fonts.ready.then(() => setTimeout(res, 1500)))
       })
 
       setProgress(90); setOL(90)
@@ -722,7 +840,7 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
             display:'flex',alignItems:'center',justifyContent:'center',fontSize:14}}>📋</div>
           <div>
             <div style={{fontSize:12,fontWeight:900,color:'#6b21a8',lineHeight:1.1}}>OMR Generator</div>
-            <div style={{fontSize:9,color:'#aaa'}}>กระดาษคำตอบ A4 · บาร์โค้ด CODE128</div>
+            <div style={{fontSize:9,color:'#aaa'}}>กระดาษคำตอบ A4 · QR Code</div>
           </div>
         </div>
         <div style={{width:1,height:28,background:'#eee',flexShrink:0}}/>
@@ -931,6 +1049,19 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
                     </div>
                     <span style={{ color:'#c4b5fd', fontSize:13, transition:'transform 0.2s',
                       transform: expandedBatch===b.id ? 'rotate(180deg)' : 'none' }}>▾</span>
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteBatch(b.id) }}
+                      title="ลบประวัตินี้"
+                      style={{
+                        background:'transparent', border:'1px solid rgba(239,68,68,0.3)',
+                        color:'#ef4444', borderRadius:6, width:26, height:26,
+                        fontSize:12, cursor:'pointer', display:'flex',
+                        alignItems:'center', justifyContent:'center', flexShrink:0,
+                        transition:'all 0.15s',
+                      }}
+                      onMouseEnter={e=>(e.currentTarget.style.background='rgba(239,68,68,0.1)')}
+                      onMouseLeave={e=>(e.currentTarget.style.background='transparent')}
+                    >🗑</button>
                   </div>
 
                   {/* Expanded: serial list */}
@@ -952,17 +1083,36 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
                           </span>
                         ))}
                       </div>
-                      {/* ปุ่ม copy all serials */}
-                      <button
-                        onClick={() => {
-                          navigator.clipboard.writeText(b.serials.join('\n'))
-                          .then(() => alert('คัดลอก ' + b.serials.length + ' รหัสแล้ว'))
-                        }}
-                        style={{ marginTop:10, padding:'5px 14px', borderRadius:6,
-                          background:'#6b21a8', color:'white', border:'none',
-                          fontSize:11, fontWeight:700, cursor:'pointer' }}>
-                        📋 คัดลอกรหัสทั้งหมด
-                      </button>
+                      {/* ปุ่ม copy all serials + download PDF */}
+                      <div style={{ marginTop:10, display:'flex', gap:8, flexWrap:'wrap' }}>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(b.serials.join('\n'))
+                            .then(() => alert('คัดลอก ' + b.serials.length + ' รหัสแล้ว'))
+                          }}
+                          style={{ padding:'5px 14px', borderRadius:6,
+                            background:'white', color:'#6b21a8',
+                            border:'1.5px solid #6b21a8',
+                            fontSize:11, fontWeight:700, cursor:'pointer',
+                            display:'flex', alignItems:'center', gap:5 }}>
+                          📋 คัดลอกรหัสทั้งหมด
+                        </button>
+                        <button
+                          onClick={() => downloadBatchPDF(b)}
+                          disabled={downloadingBatch === b.id}
+                          style={{
+                            padding:'5px 16px', borderRadius:6,
+                            background: downloadingBatch === b.id ? '#9ca3af' : '#6b21a8',
+                            color:'white', border:'none',
+                            fontSize:11, fontWeight:700,
+                            cursor: downloadingBatch === b.id ? 'not-allowed' : 'pointer',
+                            display:'flex', alignItems:'center', gap:5,
+                            boxShadow:'0 2px 8px rgba(107,33,168,0.3)',
+                            transition:'background 0.2s',
+                          }}>
+                          {downloadingBatch === b.id ? '⏳ กำลังเตรียม...' : '⬇️ โหลด PDF ย้อนหลัง'}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -982,7 +1132,7 @@ export default function OMRSheetGenerator({ onClose }: { onClose?: () => void })
       <div style={{ margin:'8px 14px 0', padding:'6px 12px', background:'#ede9fe',
         borderRadius:8, border:'1px solid #c4b5fd', fontSize:11, color:'#5a1a9e',
         fontWeight:700, display:'flex', alignItems:'center', gap:8 }}>
-        📄 A4 Portrait · scale 3× PNG · บาร์โค้ดอยู่ใต้ "ชุดที่" ฝั่งซ้าย · ไม่มีรหัสข้างๆ
+        📄 A4 Portrait · QR Code อยู่ใต้ "ชุดที่" ฝั่งซ้าย · สแกน QR Code ได้ทุก browser
       </div>
 
       {useSerial&&copies>0&&(

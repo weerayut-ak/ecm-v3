@@ -87,10 +87,10 @@ function exportXLS(rows: ExportRow[], filename: string, sheetName = 'คะแ�
 
 // ─── Sort Icon ─────────────────────────────────────────────────────────────────
 function SortIcon({ col, sortCol, sortDir }: { col: string; sortCol: string; sortDir: SortDir }) {
-  if (sortCol !== col) return <ChevronsUpDown size={13} style={{ color: '#d1d5db', marginLeft: 2 }} />
+  if (sortCol !== col) return <ChevronsUpDown className="w-3.5 h-3.5 text-slate-300 ml-1 inline" />
   return sortDir === 'asc'
-    ? <ChevronUp size={13} style={{ color: '#6366f1', marginLeft: 2 }} />
-    : <ChevronDown size={13} style={{ color: '#6366f1', marginLeft: 2 }} />
+    ? <ChevronUp className="w-3.5 h-3.5 text-indigo-500 ml-1 inline" />
+    : <ChevronDown className="w-3.5 h-3.5 text-indigo-500 ml-1 inline" />
 }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
@@ -175,7 +175,7 @@ export default function AdminExportClient({
 
   const columns: Column[] = [
     { key: 'name',         label: 'ชื่อ-สกุล',   sortable: true },
-    { key: 'student_id',   label: 'รหัส',         sortable: true },
+    { key: 'student_id',   label: 'รหัส',        sortable: true },
     { key: 'grade',        label: 'ชั้น',          sortable: true },
     { key: 'quiz',         label: 'แบบทดสอบ',     sortable: true },
     { key: 'score',        label: 'คะแนน',        sortable: true },
@@ -202,47 +202,48 @@ export default function AdminExportClient({
     }, [])
 
   return (
-    <div style={{ fontFamily: 'system-ui, -apple-system, sans-serif', maxWidth: 1100, margin: '0 auto', padding: '1.5rem', color: '#1e293b' }}>
+    <div className="font-sans max-w-6xl mx-auto p-4 sm:p-6 text-slate-800">
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: '1.5rem' }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: 'linear-gradient(135deg,#4f46e5,#6366f1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <GraduationCap size={20} color='#fff' />
+      <div className="flex items-center gap-3 mb-6">
+        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-600 to-indigo-500 flex items-center justify-center shrink-0">
+          <GraduationCap className="w-5 h-5 text-white" />
         </div>
         <div>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#0f172a' }}>นำออกข้อมูลคะแนน</h1>
-          <p style={{ margin: 0, fontSize: 13, color: '#64748b' }}>{submissions.length} รายการทั้งหมด</p>
+          <h1 className="m-0 text-lg sm:text-xl font-bold text-slate-900">นำออกข้อมูลคะแนน</h1>
+          <p className="m-0 text-xs sm:text-sm text-slate-500">{submissions.length} รายการทั้งหมด</p>
         </div>
       </div>
 
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: '1.25rem' }}>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-5">
         {([
-          { label: 'รายการที่เลือก', value: filtered.length, color: '#4f46e5', bg: '#eef2ff' },
-          { label: 'อัตราผ่าน',     value: `${passRate}%`,  color: '#059669', bg: '#ecfdf5' },
-          { label: 'คะแนนเฉลี่ย',   value: `${avgScore}%`,  color: '#0ea5e9', bg: '#f0f9ff' },
+          { label: 'รายการที่เลือก', value: filtered.length, colorText: 'text-indigo-600', bg: 'bg-indigo-50' },
+          { label: 'อัตราผ่าน',     value: `${passRate}%`,  colorText: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: 'คะแนนเฉลี่ย',   value: `${avgScore}%`,  colorText: 'text-sky-600', bg: 'bg-sky-50' },
         ] as const).map(s => (
-          <div key={s.label} style={{ background: s.bg, borderRadius: 10, padding: '12px 16px' }}>
-            <p style={{ margin: 0, fontSize: 12, color: s.color, fontWeight: 600, opacity: 0.8 }}>{s.label}</p>
-            <p style={{ margin: '2px 0 0', fontSize: 22, fontWeight: 700, color: s.color }}>{s.value}</p>
+          <div key={s.label} className={`${s.bg} rounded-xl p-4`}>
+            <p className={`m-0 text-xs font-semibold opacity-80 ${s.colorText}`}>{s.label}</p>
+            <p className={`mt-1 mb-0 text-2xl font-bold ${s.colorText}`}>{s.value}</p>
           </div>
         ))}
       </div>
 
       {/* Filter & Export */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: '1.25rem', marginBottom: '1.25rem', boxShadow: '0 1px 3px rgba(0,0,0,.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 14 }}>
-          <Filter size={14} color='#6366f1' />
-          <span style={{ fontWeight: 600, fontSize: 14, color: '#1e293b' }}>ตัวกรองและการนำออก</span>
+      <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 mb-5 shadow-sm">
+        <div className="flex items-center gap-2 mb-4">
+          <Filter className="w-4 h-4 text-indigo-500" />
+          <span className="font-semibold text-sm text-slate-800">ตัวกรองและการนำออก</span>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 14, alignItems: 'end' }}>
+        
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-4 items-end">
           {/* Quiz select */}
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>เลือกแบบทดสอบ</label>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">เลือกแบบทดสอบ</label>
             <select
               value={selectedQuiz}
               onChange={e => handleQuizChange(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid #cbd5e1', fontSize: 14, background: '#f8fafc', color: '#1e293b', outline: 'none', cursor: 'pointer' }}
+              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-slate-50 text-slate-800 outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 cursor-pointer transition-all"
             >
               <option value='all'>ทั้งหมด ({submissions.length} รายการ)</option>
               {quizzes.map((q: Quiz) => (
@@ -255,24 +256,23 @@ export default function AdminExportClient({
 
           {/* Format toggle */}
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 6 }}>รูปแบบไฟล์</label>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <label className="block text-xs font-semibold text-slate-500 mb-1.5">รูปแบบไฟล์</label>
+            <div className="flex gap-2">
               {([
-                { val: 'xlsx' as const, icon: <FileSpreadsheet size={15} />, label: 'Excel (.xls)' },
-                { val: 'csv'  as const, icon: <FileText size={15} />,        label: 'CSV' },
+                { val: 'xlsx' as const, icon: <FileSpreadsheet className="w-4 h-4" />, label: 'Excel (.xls)' },
+                { val: 'csv'  as const, icon: <FileText className="w-4 h-4" />,        label: 'CSV' },
               ]).map(f => (
                 <button
                   key={f.val}
                   onClick={() => setFormat(f.val)}
-                  style={{
-                    flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                    padding: '8px 0', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', border: '1.5px solid',
-                    transition: 'all .15s',
-                    ...(format === f.val
-                      ? { background: '#eef2ff', borderColor: '#6366f1', color: '#4338ca' }
-                      : { background: '#f8fafc', borderColor: '#e2e8f0', color: '#64748b' }),
-                  }}
-                >{f.icon}{f.label}</button>
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold cursor-pointer border-2 transition-all ${
+                    format === f.val
+                      ? 'bg-indigo-50 border-indigo-500 text-indigo-700'
+                      : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  {f.icon}{f.label}
+                </button>
               ))}
             </div>
           </div>
@@ -280,58 +280,51 @@ export default function AdminExportClient({
           {/* Export button */}
           <button
             onClick={doExport}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '9px 20px',
-              background: 'linear-gradient(135deg,#4f46e5,#6366f1)', color: '#fff',
-              border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer',
-              whiteSpace: 'nowrap', boxShadow: '0 2px 8px rgba(99,102,241,.35)',
-            }}
+            className="flex items-center justify-center w-full md:w-auto gap-2 px-5 py-2 bg-gradient-to-br from-indigo-600 to-indigo-500 text-white border-none rounded-lg font-bold text-sm cursor-pointer whitespace-nowrap shadow-md shadow-indigo-500/30 hover:opacity-90 transition-opacity min-h-[40px]"
           >
-            <Download size={15} />
+            <Download className="w-4 h-4" />
             นำออก {filtered.length} รายการ
           </button>
         </div>
       </div>
 
       {/* Table card */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 1px 3px rgba(0,0,0,.06)', overflow: 'hidden' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid #f1f5f9' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <BarChart3 size={15} color='#6366f1' />
-            <span style={{ fontWeight: 700, fontSize: 14, color: '#1e293b' }}>ตัวอย่างข้อมูล</span>
-            <span style={{ fontSize: 12, color: '#94a3b8', background: '#f1f5f9', padding: '2px 8px', borderRadius: 20 }}>{filtered.length} รายการ</span>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        
+        {/* Table Header Controls */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 border-b border-slate-100 gap-3 bg-white">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-indigo-500" />
+            <span className="font-bold text-sm text-slate-800">ตัวอย่างข้อมูล</span>
+            <span className="text-xs text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">{filtered.length} รายการ</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>แสดงหน้าละ</span>
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <span className="text-xs text-slate-500">แสดงหน้าละ</span>
             <select
               value={pageSize}
               onChange={e => { setPageSize(Number(e.target.value)); setPage(1) }}
-              style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e2e8f0', fontSize: 13, color: '#1e293b', background: '#f8fafc' }}
+              className="px-2 py-1 rounded-md border border-slate-200 text-xs text-slate-800 bg-slate-50 outline-none focus:border-indigo-500"
             >
               {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n} รายการ</option>)}
             </select>
           </div>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead>
-              <tr style={{ background: '#f8fafc' }}>
-                <th style={{ padding: '0 8px', width: 36, textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>#</th>
+        {/* Responsive Table Wrapper */}
+        <div className="overflow-x-auto w-full">
+          <table className="w-full border-collapse text-sm text-left">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-3 py-3 w-10 text-center font-semibold text-xs border-b border-slate-200">#</th>
                 {columns.map((col: Column) => (
                   <th
                     key={col.key}
                     onClick={() => col.sortable && toggleSort(col.key)}
-                    style={{
-                      padding: '11px 14px', textAlign: 'left', fontWeight: 600, fontSize: 12,
-                      color: sortCol === col.key ? '#4338ca' : '#64748b',
-                      cursor: col.sortable ? 'pointer' : 'default',
-                      userSelect: 'none', whiteSpace: 'nowrap',
-                      borderBottom: sortCol === col.key ? '2px solid #6366f1' : '2px solid transparent',
-                      transition: 'color .15s',
-                    }}
+                    className={`px-3 py-3 font-semibold text-xs whitespace-nowrap border-b-2 transition-colors ${
+                      col.sortable ? 'cursor-pointer hover:text-indigo-600' : 'cursor-default'
+                    } ${sortCol === col.key ? 'border-indigo-500 text-indigo-700' : 'border-slate-200'}`}
                   >
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span className="inline-flex items-center">
                       {col.label}
                       {col.sortable && <SortIcon col={col.key} sortCol={sortCol} sortDir={sortDir} />}
                     </span>
@@ -339,77 +332,73 @@ export default function AdminExportClient({
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {pageData.length === 0 && (
                 <tr>
-                  <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '40px', color: '#94a3b8', fontSize: 14 }}>
+                  <td colSpan={columns.length + 1} className="text-center py-10 text-slate-400 text-sm">
                     ไม่มีข้อมูล
                   </td>
                 </tr>
               )}
               {pageData.map((s: Sub, i: number) => {
                 const rowNum  = (safePage - 1) * pageSize + i + 1
-                const isEven  = i % 2 === 1
-                const bgBase  = isEven ? '#fafafa' : '#fff'
                 return (
                   <tr
                     key={s.id}
-                    style={{ background: bgBase, transition: 'background .1s' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = '#f0f4ff')}
-                    onMouseLeave={e => (e.currentTarget.style.background = bgBase)}
+                    className="hover:bg-indigo-50/50 transition-colors bg-white even:bg-slate-50/50"
                   >
-                    <td style={{ textAlign: 'center', color: '#cbd5e1', fontSize: 11, padding: '10px 8px', fontVariantNumeric: 'tabular-nums' }}>{rowNum}</td>
+                    <td className="text-center text-slate-300 text-xs px-3 py-3 tabular-nums">{rowNum}</td>
 
-                    <td style={{ padding: '10px 14px', fontWeight: 600, color: '#1e293b' }}>
-                      <div>{s.student?.full_name ?? '—'}</div>
-                      <div style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>({s.student?.nickname ?? ''})</div>
+                    <td className="px-3 py-3">
+                      <div className="font-semibold text-slate-800">{s.student?.full_name ?? '—'}</div>
+                      <div className="text-xs text-slate-400">({s.student?.nickname ?? ''})</div>
                     </td>
 
-                    <td style={{ padding: '10px 14px', fontFamily: 'monospace', fontSize: 12, color: '#64748b' }}>{s.student?.student_id ?? '—'}</td>
+                    <td className="px-3 py-3 font-mono text-xs text-slate-500">{s.student?.student_id ?? '—'}</td>
 
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{ background: '#ede9fe', color: '#5b21b6', fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 20 }}>
+                    <td className="px-3 py-3">
+                      <span className="bg-violet-100 text-violet-800 text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap">
                         {s.student?.grade ?? '—'}
                       </span>
                     </td>
 
-                    <td style={{ padding: '10px 14px', color: '#475569', fontSize: 12, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <td className="px-3 py-3 text-slate-600 text-xs max-w-[140px] truncate" title={s.quiz?.title ?? ''}>
                       {s.quiz?.title ?? '—'}
                     </td>
 
-                    <td style={{ padding: '10px 14px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ height: 6, width: 60, borderRadius: 99, background: '#e2e8f0', overflow: 'hidden' }}>
-                          <div style={{
-                            height: '100%', width: `${s.score ?? 0}%`, borderRadius: 99,
-                            background: (s.score ?? 0) >= 80 ? '#10b981' : (s.score ?? 0) >= 60 ? '#f59e0b' : '#ef4444',
-                          }} />
+                    <td className="px-3 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-16 rounded-full bg-slate-200 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full ${
+                              (s.score ?? 0) >= 80 ? 'bg-emerald-500' : (s.score ?? 0) >= 60 ? 'bg-amber-500' : 'bg-red-500'
+                            }`}
+                            style={{ width: `${s.score ?? 0}%` }}
+                          />
                         </div>
-                        <span style={{ fontWeight: 700, color: (s.score ?? 0) >= 80 ? '#059669' : (s.score ?? 0) >= 60 ? '#d97706' : '#dc2626', fontSize: 13 }}>
+                        <span className={`font-bold text-xs ${
+                          (s.score ?? 0) >= 80 ? 'text-emerald-600' : (s.score ?? 0) >= 60 ? 'text-amber-600' : 'text-red-600'
+                        }`}>
                           {s.score != null ? `${s.score.toFixed(0)}%` : '—'}
                         </span>
                       </div>
                     </td>
 
-                    <td style={{ padding: '10px 14px' }}>
-                      <span style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 700,
-                        padding: '4px 10px', borderRadius: 20,
-                        ...(s.is_passed
-                          ? { background: '#dcfce7', color: '#15803d' }
-                          : { background: '#fee2e2', color: '#b91c1c' }),
-                      }}>
+                    <td className="px-3 py-3">
+                      <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-1 rounded-full whitespace-nowrap ${
+                        s.is_passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
                         {s.is_passed ? '✓ ผ่าน' : '✗ ไม่ผ่าน'}
                       </span>
                     </td>
 
-                    <td style={{ padding: '10px 14px', color: '#94a3b8', fontSize: 12, fontVariantNumeric: 'tabular-nums' }}>
+                    <td className="px-3 py-3 text-slate-400 text-xs tabular-nums">
                       {s.time_taken != null
                         ? `${Math.floor(s.time_taken / 60)}:${String(s.time_taken % 60).padStart(2, '0')}`
                         : '—'}
                     </td>
 
-                    <td style={{ padding: '10px 14px', color: '#64748b', fontSize: 12, whiteSpace: 'nowrap' }}>
+                    <td className="px-3 py-3 text-slate-500 text-xs whitespace-nowrap">
                       {new Date(s.submitted_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
                     </td>
                   </tr>
@@ -420,52 +409,68 @@ export default function AdminExportClient({
         </div>
 
         {/* Pagination */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', borderTop: '1px solid #f1f5f9', background: '#fafafa' }}>
-          <span style={{ fontSize: 13, color: '#94a3b8' }}>
+        <div className="flex flex-col sm:flex-row items-center justify-between p-4 border-t border-slate-100 bg-slate-50 gap-4">
+          <span className="text-xs text-slate-500">
             แสดง {(safePage - 1) * pageSize + 1}–{Math.min(safePage * pageSize, sorted.length)} จาก {sorted.length} รายการ
           </span>
-          <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+          
+          <div className="flex gap-1 items-center">
             {([
-              { icon: <ChevronsLeft size={14} />, action: () => setPage(1),                              disabled: safePage === 1 },
-              { icon: <ChevronLeft  size={14} />, action: () => setPage(p => Math.max(1, p - 1)),        disabled: safePage === 1 },
+              { icon: <ChevronsLeft className="w-4 h-4" />, action: () => setPage(1), disabled: safePage === 1 },
+              { icon: <ChevronLeft className="w-4 h-4" />,  action: () => setPage(p => Math.max(1, p - 1)), disabled: safePage === 1 },
             ] as const).map((btn, i) => (
-              <button key={i} onClick={btn.action} disabled={btn.disabled} style={{
-                width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 6, border: '1px solid #e2e8f0',
-                background: btn.disabled ? '#f8fafc' : '#fff',
-                color:      btn.disabled ? '#cbd5e1' : '#64748b',
-                cursor:     btn.disabled ? 'not-allowed' : 'pointer',
-              }}>{btn.icon}</button>
+              <button
+                key={i}
+                onClick={btn.action}
+                disabled={btn.disabled}
+                className={`w-8 h-8 flex items-center justify-center rounded-md border ${
+                  btn.disabled
+                    ? 'bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100 cursor-pointer'
+                }`}
+              >
+                {btn.icon}
+              </button>
             ))}
 
             {pageItems.map((p: PageItem, i: number) =>
               p === '...' ? (
-                <span key={`ellipsis-${i}`} style={{ padding: '0 4px', color: '#94a3b8', fontSize: 13 }}>…</span>
+                <span key={`ellipsis-${i}`} className="px-1 text-slate-400 text-sm">…</span>
               ) : (
-                <button key={p} onClick={() => setPage(p as number)} style={{
-                  minWidth: 30, height: 30, padding: '0 6px', borderRadius: 6, border: '1px solid',
-                  fontSize: 13, fontWeight: p === safePage ? 700 : 400, cursor: 'pointer',
-                  ...(p === safePage
-                    ? { background: '#4f46e5', borderColor: '#4f46e5', color: '#fff' }
-                    : { background: '#fff',    borderColor: '#e2e8f0', color: '#64748b' }),
-                }}>{p}</button>
+                <button
+                  key={p}
+                  onClick={() => setPage(p as number)}
+                  className={`min-w-[32px] h-8 px-2 rounded-md border text-xs transition-colors ${
+                    p === safePage
+                      ? 'bg-indigo-600 border-indigo-600 text-white font-bold'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100 font-medium'
+                  }`}
+                >
+                  {p}
+                </button>
               )
             )}
 
             {([
-              { icon: <ChevronRight  size={14} />, action: () => setPage(p => Math.min(totalPages, p + 1)), disabled: safePage === totalPages },
-              { icon: <ChevronsRight size={14} />, action: () => setPage(totalPages),                       disabled: safePage === totalPages },
+              { icon: <ChevronRight className="w-4 h-4" />,  action: () => setPage(p => Math.min(totalPages, p + 1)), disabled: safePage === totalPages },
+              { icon: <ChevronsRight className="w-4 h-4" />, action: () => setPage(totalPages), disabled: safePage === totalPages },
             ] as const).map((btn, i) => (
-              <button key={i} onClick={btn.action} disabled={btn.disabled} style={{
-                width: 30, height: 30, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                borderRadius: 6, border: '1px solid #e2e8f0',
-                background: btn.disabled ? '#f8fafc' : '#fff',
-                color:      btn.disabled ? '#cbd5e1' : '#64748b',
-                cursor:     btn.disabled ? 'not-allowed' : 'pointer',
-              }}>{btn.icon}</button>
+              <button
+                key={i}
+                onClick={btn.action}
+                disabled={btn.disabled}
+                className={`w-8 h-8 flex items-center justify-center rounded-md border ${
+                  btn.disabled
+                    ? 'bg-slate-50 border-slate-200 text-slate-300 cursor-not-allowed'
+                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-100 cursor-pointer'
+                }`}
+              >
+                {btn.icon}
+              </button>
             ))}
           </div>
         </div>
+        
       </div>
     </div>
   )

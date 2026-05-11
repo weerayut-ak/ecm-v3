@@ -1,15 +1,16 @@
 ﻿'use client'
-import { useState } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import type { Announcement } from '@/types/announcement'
 import { createClient } from '@/lib/supabase/client'
 import { parseExcelOrCSV, normalizeScoreRows } from '@/lib/upload'
-import { Plus, X, Pin, PinOff, Trash2, Upload, Megaphone, Image as ImageIcon, BarChart2, MoreVertical, ChevronDown, LayoutGrid } from 'lucide-react'
+import { Plus, X, Pin, PinOff, Trash2, Upload, Megaphone, Image as ImageIcon, BarChart2, MoreVertical, ChevronDown, LayoutGrid, ChevronsUpDown, ChevronUp, ArrowUpDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { createPortal } from 'react-dom'
 
 
 type Ann = Announcement & { author?: { full_name: string; nickname: string | null } | null }
 type ParsedRow = Record<string, string | number>
+type SortDir = 'asc' | 'desc' | null
 
 /* ─── CSS ──────────────────────────────────────────────────────────────── */
 const CSS = `
@@ -74,24 +75,6 @@ const CSS = `
   /* image full */
   .ann-card-img { width: 100%; border-radius: var(--r-lg); display: block; margin-top: 10px; }
 
-  /* score table */
-  .ann-score-header { display: flex; align-items: center; gap: 8px; margin: 12px 0 8px; }
-  .ann-score-count  { font-size: 12px; font-weight: 700; color: var(--outline); background: var(--surface-highest); padding: 2px 10px; border-radius: 999px; }
-  .ann-tbl-wrap     { overflow-x: auto; border-radius: var(--r-lg); border: 1px solid var(--outline-variant); margin-bottom: 4px; }
-  .ann-tbl          { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 320px; }
-  .ann-tbl th       { padding: 10px 14px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--outline); background: var(--surface-low); border-bottom: 1.5px solid var(--outline-variant); text-align: left; white-space: nowrap; }
-  .ann-tbl td       { padding: 11px 14px; border-bottom: 1px solid var(--surface-highest); color: var(--on-surface); vertical-align: middle; }
-  .ann-tbl tbody tr:last-child td { border-bottom: none; }
-  .ann-tbl tbody tr:hover td      { background: var(--surface-low); }
-  .ann-score-num    { font-weight: 700; color: var(--primary); }
-  .ann-grade-badge  {
-    display: inline-block; padding: 2px 9px; border-radius: 999px;
-    font-size: 11px; font-weight: 800; letter-spacing: 0.04em;
-  }
-
-  /* show-more rows */
-  .ann-show-more { font-size: 12px; font-weight: 600; color: var(--primary); background: none; border: none; cursor: pointer; font-family: var(--font); padding: 6px 0 10px; display: block; }
-
   /* footer */
   .ann-card-footer { padding: 6px 20px 14px; display: flex; align-items: center; justify-content: space-between; }
   .ann-actions     { display: flex; align-items: center; gap: 4px; position: relative; }
@@ -132,19 +115,336 @@ const CSS = `
     .ann-card-header { padding: 14px 14px 10px; gap: 10px; }
     .ann-card-body   { padding: 0 14px 4px; }
     .ann-card-footer { padding: 4px 14px 12px; }
-    .ann-tbl th, .ann-tbl td { padding: 9px 10px; font-size: 12px; }
     .pill-label { display: none; }
     .pill-icon  { display: inline; font-size: 16px; }
     .ann-pill   { padding: 7px 12px; }
   }
+
+  /* ═══════════════════════════════════════════════════════════
+     AG GRID ENTERPRISE-STYLE SCORE TABLE  (table-based)
+     ═══════════════════════════════════════════════════════════ */
+
+  .ag-wrap {
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--outline-variant, #dde1ec);
+    margin-top: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.09);
+    font-family: 'DM Sans', -apple-system, sans-serif;
+  }
+
+  /* ── Toolbar ── */
+  .ag-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px 10px 16px;
+    background: #1a2340;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .ag-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .ag-toolbar-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255,255,255,0.85);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .ag-row-count-badge {
+    background: rgba(0,163,255,0.18);
+    color: #60c8ff;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 9px;
+    border-radius: 999px;
+    letter-spacing: 0.06em;
+  }
+  .ag-search-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 7px;
+    padding: 5px 10px;
+    min-width: 0;
+    width: 200px;
+    max-width: 100%;
+  }
+  .ag-search-box input {
+    background: none;
+    border: none;
+    outline: none;
+    color: rgba(255,255,255,0.9);
+    font-size: 12px;
+    font-family: inherit;
+    width: 100%;
+  }
+  .ag-search-box input::placeholder { color: rgba(255,255,255,0.32); }
+  .ag-search-clear {
+    background: none; border: none; color: rgba(255,255,255,0.4);
+    cursor: pointer; padding: 0; display: flex; align-items: center; flex-shrink: 0;
+  }
+
+  /* ── Scrollable table container ── */
+  .ag-body {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 400px;
+    background: var(--surface-lowest, #fff);
+  }
+  .ag-body::-webkit-scrollbar { width: 6px; height: 6px; }
+  .ag-body::-webkit-scrollbar-track { background: transparent; }
+  .ag-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.14); border-radius: 999px; }
+
+  /* ── Table itself ── */
+  .ag-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: auto;
+    min-width: 400px;
+  }
+
+  /* ── Header ── */
+  .ag-table thead { position: sticky; top: 0; z-index: 2; }
+  .ag-table thead tr { background: #232e4a; }
+  .ag-th {
+    padding: 11px 14px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.5);
+    border-right: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 2px solid rgba(255,255,255,0.07);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    text-align: left;
+    transition: background 0.15s, color 0.15s;
+  }
+  .ag-th:last-child { border-right: none; }
+  .ag-th:hover { background: rgba(255,255,255,0.05); color: rgba(255,255,255,0.85); }
+  .ag-th.sorted { color: #60c8ff; background: rgba(0,163,255,0.07); }
+  .ag-th-inner { display: flex; align-items: center; gap: 5px; }
+  .ag-th-label { flex: 1; }
+  .ag-sort-icon { flex-shrink: 0; opacity: 0.45; transition: opacity 0.15s, transform 0.22s ease; }
+  .ag-th.sorted .ag-sort-icon { opacity: 1; }
+  .ag-sort-icon.desc { transform: rotate(180deg); }
+
+  /* Row-number th */
+  .ag-th-rownum {
+    width: 40px;
+    min-width: 40px;
+    text-align: center;
+    padding: 11px 6px;
+    color: rgba(255,255,255,0.28);
+    font-size: 9px;
+    cursor: default;
+    border-right: 1px solid rgba(255,255,255,0.05);
+    border-bottom: 2px solid rgba(255,255,255,0.07);
+    background: rgba(0,0,0,0.08);
+  }
+
+  /* ── Data rows ── */
+  .ag-table tbody tr {
+    border-bottom: 1px solid var(--surface-highest, #eef0f8);
+    transition: background 0.1s;
+    animation: agRowIn 0.26s both;
+  }
+  .ag-table tbody tr:last-child { border-bottom: none; }
+  .ag-table tbody tr:nth-child(even) { background: rgba(0,80,203,0.018); }
+  .ag-table tbody tr:hover { background: rgba(0,80,203,0.06) !important; }
+
+  @keyframes agRowIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .ag-table tbody tr:nth-child(1)  { animation-delay: 0.00s; }
+  .ag-table tbody tr:nth-child(2)  { animation-delay: 0.03s; }
+  .ag-table tbody tr:nth-child(3)  { animation-delay: 0.055s; }
+  .ag-table tbody tr:nth-child(4)  { animation-delay: 0.08s; }
+  .ag-table tbody tr:nth-child(5)  { animation-delay: 0.10s; }
+  .ag-table tbody tr:nth-child(6)  { animation-delay: 0.12s; }
+  .ag-table tbody tr:nth-child(7)  { animation-delay: 0.14s; }
+  .ag-table tbody tr:nth-child(8)  { animation-delay: 0.155s; }
+  .ag-table tbody tr:nth-child(9)  { animation-delay: 0.17s; }
+  .ag-table tbody tr:nth-child(10) { animation-delay: 0.185s; }
+
+  /* ── Cells ── */
+  .ag-td {
+    padding: 10px 14px;
+    font-size: 12.5px;
+    color: var(--on-surface, #1a2340);
+    border-right: 1px solid var(--surface-highest, #eef0f8);
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+  }
+  .ag-td:last-child { border-right: none; }
+
+  /* row-num td */
+  .ag-td-rownum {
+    width: 40px;
+    min-width: 40px;
+    text-align: center;
+    padding: 10px 4px;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(0,80,203,0.38);
+    background: rgba(0,80,203,0.022);
+    border-right: 1px solid var(--surface-highest, #eef0f8);
+    vertical-align: middle;
+  }
+
+  /* ── Score cell: badge + bar ── */
+  .ag-score-wrap { display: flex; align-items: center; gap: 8px; }
+  .ag-score-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 46px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .ag-table tbody tr:hover .ag-score-badge { transform: scale(1.07); }
+  .ag-score-bar-track {
+    flex: 1;
+    min-width: 28px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--surface-highest, #eef0f8);
+    overflow: hidden;
+  }
+  .ag-score-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.65s cubic-bezier(0.34, 1.5, 0.64, 1);
+  }
+
+  /* ── Pagination bar ── */
+  .ag-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: #f8f9fc;
+    border-top: 1px solid var(--outline-variant, #dde1ec);
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 44px;
+  }
+  .ag-page-info {
+    font-size: 12.5px;
+    color: #8892aa;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .ag-page-info strong { color: #1a2340; font-weight: 700; }
+  .ag-page-btns { display: flex; align-items: center; gap: 4px; }
+  .ag-page-btn {
+    display: flex; align-items: center; justify-content: center;
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--outline-variant, #dde1ec);
+    background: #fff;
+    font-size: 12px; font-weight: 700; color: #4a5270;
+    cursor: pointer; font-family: inherit;
+    transition: all 0.14s;
+    user-select: none;
+  }
+  .ag-page-btn:hover:not(:disabled):not(.active) {
+    background: var(--surface-low, #f0f2f8);
+    border-color: #b0b8d4;
+    color: #1a2340;
+  }
+  .ag-page-btn.active {
+    background: var(--primary, #0050cb);
+    border-color: var(--primary, #0050cb);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(0,80,203,0.28);
+  }
+  .ag-page-btn:disabled { opacity: 0.32; cursor: not-allowed; }
+
+  /* ── OLD show-more (kept for reference, unused) ── */
+  .ag-show-more {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; padding: 10px 0;
+    background: rgba(0,80,203,0.035);
+    border: none;
+    border-top: 1px dashed var(--outline-variant, #dde1ec);
+    font-size: 12px; font-weight: 700;
+    color: var(--primary, #0050cb);
+    cursor: pointer; font-family: inherit;
+    transition: background 0.15s;
+    letter-spacing: 0.02em;
+  }
+  .ag-show-more:hover { background: rgba(0,80,203,0.08); }
+
+  /* ── Status bar ── */
+  .ag-statusbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 16px;
+    background: #f4f6fb;
+    border-top: 1px solid var(--outline-variant, #dde1ec);
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 32px;
+  }
+  .ag-status-group { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+  .ag-status-item {
+    display: flex; align-items: center; gap: 4px;
+    font-size: 10.5px; font-weight: 700;
+    color: #8892aa;
+    letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .ag-status-val { color: #1a2340; font-weight: 800; }
+  .ag-status-dot {
+    width: 6px; height: 6px; border-radius: 999px;
+    background: var(--primary, #0050cb); opacity: 0.5;
+  }
+
+  /* ── Empty state ── */
+  .ag-empty {
+    padding: 36px 0; text-align: center;
+    font-size: 13px; color: var(--outline, #8892aa);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 600px) {
+    .ag-score-bar-track { display: none; }
+    .ag-toolbar-title .ag-title-label { display: none; }
+    .ag-th, .ag-td { padding: 9px 10px; font-size: 11.5px; }
+    .ag-th-rownum, .ag-td-rownum { display: none; }
+    .ag-search-box { width: 150px; }
+    .ag-status-item:not(:first-child) { display: none; }
+  }
 `
 
 /* ─── Grade colour helper ─────────────────────────────────────────────── */
-function gradeColor(val: number, max: number): { bg: string; color: string } {
-  const pct = max > 0 ? val / max : 0
-  if (pct >= 0.8) return { bg: 'rgba(5,150,105,0.1)', color: '#059669' }
-  if (pct >= 0.6) return { bg: 'rgba(217,119,6,0.08)', color: '#d97706' }
-  return { bg: 'rgba(220,38,38,0.08)', color: '#dc2626' }
+function gradeColor(pct: number): { bg: string; color: string; bar: string } {
+  if (pct >= 0.8) return { bg: 'rgba(5,150,105,0.10)', color: '#059669', bar: '#059669' }
+  if (pct >= 0.6) return { bg: 'rgba(217,119,6,0.09)', color: '#d97706', bar: '#f59e0b' }
+  return { bg: 'rgba(220,38,38,0.09)', color: '#dc2626', bar: '#ef4444' }
 }
 
 /* ─── detect numeric columns ─────────────────────────────────────────── */
@@ -157,65 +457,248 @@ function getNumericCols(rows: ParsedRow[]): Set<string> {
   return s
 }
 
-/* ─── detect max per numeric col ────────────────────────────────────── */
 function getMaxPerCol(rows: ParsedRow[], numCols: Set<string>): Record<string, number> {
   const m: Record<string, number> = {}
-  for (const k of numCols) {
-    m[k] = Math.max(...rows.map(r => Number(r[k] ?? 0)))
-  }
+  for (const k of numCols) m[k] = Math.max(...rows.map(r => Number(r[k] ?? 0)))
   return m
 }
 
-const SCORE_TABLE_PREVIEW = 5
+const PREVIEW_SIZE = 8
 
-/* ─── ScoreTable component ───────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   AG-GRID ENTERPRISE STYLE SCORE TABLE  (table-based fix)
+   ═══════════════════════════════════════════════════════════ */
 function ScoreTable({ rows }: { rows: ParsedRow[] }) {
-  const [showAll, setShowAll] = useState(false)
+  const [page, setPage] = useState(1)
+  const [sortCol, setSortCol] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<SortDir>(null)
+  const [query, setQuery] = useState('')
+
   if (!rows.length) return null
 
   const cols = Object.keys(rows[0])
   const numCols = getNumericCols(rows)
   const maxPer = getMaxPerCol(rows, numCols)
-  const displayed = showAll ? rows : rows.slice(0, SCORE_TABLE_PREVIEW)
+
+  // Filter
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter(row => cols.some(c => String(row[c] ?? '').toLowerCase().includes(q)))
+  }, [rows, query, cols])
+
+  // Sort
+  const sorted = useMemo(() => {
+    if (!sortCol || !sortDir) return filtered
+    return [...filtered].sort((a, b) => {
+      const av = a[sortCol]; const bv = b[sortCol]
+      const an = Number(av); const bn = Number(bv)
+      if (!isNaN(an) && !isNaN(bn)) return sortDir === 'asc' ? an - bn : bn - an
+      return sortDir === 'asc'
+        ? String(av ?? '').localeCompare(String(bv ?? ''))
+        : String(bv ?? '').localeCompare(String(av ?? ''))
+    })
+  }, [filtered, sortCol, sortDir])
+
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PREVIEW_SIZE))
+  const safePage = Math.min(page, totalPages)
+  const startIdx = (safePage - 1) * PREVIEW_SIZE
+  const endIdx = Math.min(startIdx + PREVIEW_SIZE, sorted.length)
+  const displayed = sorted.slice(startIdx, endIdx)
+
+  function handleSort(col: string) {
+    if (sortCol !== col) { setSortCol(col); setSortDir('asc'); setPage(1); return }
+    if (sortDir === 'asc') { setSortDir('desc'); return }
+    setSortCol(null); setSortDir(null)
+  }
+
+  function goPage(p: number) {
+    setPage(Math.max(1, Math.min(p, totalPages)))
+  }
+
+  // Reset page when filter/sort changes
+  useMemo(() => { setPage(1) }, [query, sortCol, sortDir])
+
+  // Stats
+  const stats = useMemo(() => {
+    const firstNum = [...numCols].find(c => maxPer[c] > 0)
+    if (!firstNum) return null
+    const vals = sorted.map(r => Number(r[firstNum])).filter(v => !isNaN(v))
+    if (!vals.length) return null
+    const avg = (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(1)
+    return { col: firstNum, avg, max: Math.max(...vals), min: Math.min(...vals) }
+  }, [sorted, numCols, maxPer])
+
+  // Page buttons: first, prev, up to 5 page numbers, next, last
+  function pageButtons() {
+    const btns: (number | '...')[] = []
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) btns.push(i)
+    } else {
+      btns.push(1)
+      if (safePage > 3) btns.push('...')
+      for (let i = Math.max(2, safePage - 1); i <= Math.min(totalPages - 1, safePage + 1); i++) btns.push(i)
+      if (safePage < totalPages - 2) btns.push('...')
+      btns.push(totalPages)
+    }
+    return btns
+  }
 
   return (
-    <div>
-      <div className="ann-score-header">
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--on-surface)' }}>ตารางคะแนน</span>
-        <span className="ann-score-count">{rows.length} รายการ</span>
+    <div className="ag-wrap">
+
+      {/* ── Toolbar ── */}
+      <div className="ag-toolbar">
+        <div className="ag-toolbar-left">
+          <div className="ag-toolbar-title">
+            <BarChart2 size={13} />
+            <span className="ag-title-label">ตารางคะแนน</span>
+          </div>
+          <span className="ag-row-count-badge">{sorted.length} ROWS</span>
+        </div>
+        <div className="ag-search-box">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.38)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input
+            placeholder="ค้นหา..."
+            value={query}
+            onChange={e => { setQuery(e.target.value) }}
+          />
+          {query && (
+            <button className="ag-search-clear" onClick={() => setQuery('')}>
+              <X size={11} />
+            </button>
+          )}
+        </div>
       </div>
-      <div className="ann-tbl-wrap">
-        <table className="ann-tbl">
-          <thead>
-            <tr>{cols.map(c => <th key={c}>{c}</th>)}</tr>
-          </thead>
-          <tbody>
-            {displayed.map((row, i) => (
-              <tr key={i}>
-                {cols.map(c => {
-                  const val = row[c]
-                  const isNum = numCols.has(c) && val !== '' && val !== null && val !== undefined
-                  if (isNum) {
-                    const n = Number(val)
-                    const gc = gradeColor(n, maxPer[c] ?? 100)
-                    return (
-                      <td key={c}>
-                        <span className="ann-grade-badge" style={{ background: gc.bg, color: gc.color }}>{n}</span>
-                      </td>
-                    )
-                  }
-                  return <td key={c}>{String(val ?? '')}</td>
+
+      {/* ── Scrollable table ── */}
+      <div className="ag-body">
+        {displayed.length === 0 ? (
+          <div className="ag-empty">ไม่พบข้อมูลที่ตรงกับการค้นหา</div>
+        ) : (
+          <table className="ag-table">
+            <thead>
+              <tr>
+                <th className="ag-th-rownum">#</th>
+                {cols.map(col => {
+                  const isSort = sortCol === col
+                  return (
+                    <th
+                      key={col}
+                      className={`ag-th ${isSort ? 'sorted' : ''}`}
+                      onClick={() => handleSort(col)}
+                    >
+                      <div className="ag-th-inner">
+                        <span className="ag-th-label">{col}</span>
+                        {isSort
+                          ? <ChevronUp size={11} className={`ag-sort-icon${sortDir === 'desc' ? ' desc' : ''}`} />
+                          : <ChevronsUpDown size={10} className="ag-sort-icon" />
+                        }
+                      </div>
+                    </th>
+                  )
                 })}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {displayed.map((row, i) => (
+                <tr key={startIdx + i}>
+                  <td className="ag-td-rownum">{startIdx + i + 1}</td>
+                  {cols.map(c => {
+                    const val = row[c]
+                    const isNum = numCols.has(c) && val !== '' && val !== null && val !== undefined
+                    if (isNum) {
+                      const n = Number(val)
+                      const mx = maxPer[c] ?? 100
+                      const pct = mx > 0 ? n / mx : 0
+                      const gc = gradeColor(pct)
+                      return (
+                        <td key={c} className="ag-td" style={{ minWidth: 110 }}>
+                          <div className="ag-score-wrap">
+                            <span className="ag-score-badge" style={{ background: gc.bg, color: gc.color }}>{n}</span>
+                            <div className="ag-score-bar-track">
+                              <div className="ag-score-bar-fill" style={{ width: `${Math.min(pct * 100, 100)}%`, background: gc.bar }} />
+                            </div>
+                          </div>
+                        </td>
+                      )
+                    }
+                    return <td key={c} className="ag-td">{String(val ?? '')}</td>
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
-      {rows.length > SCORE_TABLE_PREVIEW && (
-        <button className="ann-show-more" onClick={() => setShowAll(p => !p)}>
-          {showAll ? `▲ ย่อ (แสดง ${SCORE_TABLE_PREVIEW} แถว)` : `▼ ดูทั้งหมด ${rows.length} รายการ`}
-        </button>
-      )}
+
+      {/* ── Stats row ── */}
+      <div className="ag-statusbar">
+        <div className="ag-status-group">
+          <span className="ag-status-item">ROWS&nbsp;<span className="ag-status-val">{sorted.length}</span></span>
+          {stats && (
+            <>
+              <span className="ag-status-item">AVG&nbsp;<span className="ag-status-val">{stats.avg}</span></span>
+              <span className="ag-status-item">MAX&nbsp;<span className="ag-status-val">{stats.max}</span></span>
+              <span className="ag-status-item">MIN&nbsp;<span className="ag-status-val">{stats.min}</span></span>
+            </>
+          )}
+        </div>
+        {sortCol && (
+          <span className="ag-status-item">
+            <div className="ag-status-dot" />
+            SORTED&nbsp;<span className="ag-status-val">{sortCol}</span>&nbsp;{sortDir === 'asc' ? '↑' : '↓'}
+          </span>
+        )}
+      </div>
+
+      {/* ── Pagination bar ── */}
+      <div className="ag-pagination">
+        <span className="ag-page-info">
+          แสดง <strong>{sorted.length === 0 ? 0 : startIdx + 1}–{endIdx}</strong> จาก <strong>{sorted.length}</strong> รายการ
+        </span>
+        <div className="ag-page-btns">
+          {/* First */}
+          <button className="ag-page-btn" onClick={() => goPage(1)} disabled={safePage === 1} title="หน้าแรก">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="11 17 6 12 11 7"/><polyline points="18 17 13 12 18 7"/>
+            </svg>
+          </button>
+          {/* Prev */}
+          <button className="ag-page-btn" onClick={() => goPage(safePage - 1)} disabled={safePage === 1} title="ก่อนหน้า">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6"/>
+            </svg>
+          </button>
+          {/* Page numbers */}
+          {pageButtons().map((btn, idx) =>
+            btn === '...'
+              ? <span key={`ellipsis-${idx}`} style={{ padding: '0 2px', color: '#8892aa', fontSize: 13 }}>…</span>
+              : <button
+                  key={btn}
+                  className={`ag-page-btn${safePage === btn ? ' active' : ''}`}
+                  onClick={() => goPage(btn as number)}
+                >
+                  {btn}
+                </button>
+          )}
+          {/* Next */}
+          <button className="ag-page-btn" onClick={() => goPage(safePage + 1)} disabled={safePage === totalPages} title="ถัดไป">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+          {/* Last */}
+          <button className="ag-page-btn" onClick={() => goPage(totalPages)} disabled={safePage === totalPages} title="หน้าสุดท้าย">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="13 17 18 12 13 7"/><polyline points="6 17 11 12 6 7"/>
+            </svg>
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
@@ -240,14 +723,12 @@ export default function AnnouncementsClient({
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const supabase = createClient()
 
-  // Sort: pinned (is_important) first
   const sorted = [...list].sort((a, b) => {
     if (a.is_important && !b.is_important) return -1
     if (!a.is_important && b.is_important) return 1
     return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   })
   const filtered = sorted.filter(a => filter === 'all' || a.type === filter)
-
   const featuredAnn = filtered.find(a => a.is_important) ?? null
   const recentList = sorted.slice(0, 5)
 
@@ -277,7 +758,6 @@ export default function AnnouncementsClient({
 
     return (
       <div className={`ann-card ${a.is_important ? 'pinned' : ''}`}>
-        {/* Header */}
         <div className="ann-card-header">
           <div className="ann-card-icon" style={{ background: tm.bg }}>
             <span style={{ fontSize: 20 }}>{tm.icon}</span>
@@ -300,11 +780,9 @@ export default function AnnouncementsClient({
               <span>{fmt(a.created_at)}</span>
             </p>
           </div>
-          {/* Thumbnail for image type */}
           {a.type === 'image' && a.image_url && (
             <img src={a.image_url} alt="" className="ann-card-thumb" />
           )}
-          {/* 3-dot menu */}
           {isAdmin && (
             <div className="ann-actions">
               <button
@@ -328,17 +806,12 @@ export default function AnnouncementsClient({
           )}
         </div>
 
-        {/* Body */}
         <div className="ann-card-body">
-          {a.content && (
-            <p className="ann-card-text">{a.content}</p>
-          )}
+          {a.content && <p className="ann-card-text">{a.content}</p>}
           {a.type === 'image' && a.image_url && (
             <img src={a.image_url} alt={a.title} className="ann-card-img" />
           )}
-          {a.type === 'scores' && rows.length > 0 && (
-            <ScoreTable rows={rows} />
-          )}
+          {a.type === 'scores' && rows.length > 0 && <ScoreTable rows={rows} />}
         </div>
 
         <div className="ann-card-footer">
@@ -354,24 +827,22 @@ export default function AnnouncementsClient({
     <div className="ann-page" onClick={() => openMenu && setOpenMenu(null)}>
       <style>{CSS}</style>
 
-      {/* Page header */}
       <div style={{ marginBottom: 20 }}>
         <h1 className="ann-page-title">ประกาศ</h1>
         <p className="ann-page-sub">แสดงทั้งหมด {list.length} ประกาศ</p>
       </div>
 
-      {/* Toolbar */}
       <div className="ann-toolbar">
         <div className="ann-pills">
-        {(['all','text','image','scores'] as const).map(f => (
-        <button key={f} className={`ann-pill ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}
-          style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
-          <span className="pill-icon" style={{ display:'flex', alignItems:'center' }}>
-            {f === 'all' ? <LayoutGrid size={16} /> : TYPE_META[f].icon}
-          </span>
-          <span className="pill-label">{f === 'all' ? 'ทั้งหมด' : TYPE_META[f].label}</span>
-        </button>
-        ))}
+          {(['all','text','image','scores'] as const).map(f => (
+            <button key={f} className={`ann-pill ${filter === f ? 'active' : ''}`} onClick={() => setFilter(f)}
+              style={{ display:'inline-flex', alignItems:'center', gap: 6 }}>
+              <span className="pill-icon" style={{ display:'flex', alignItems:'center' }}>
+                {f === 'all' ? <LayoutGrid size={16} /> : TYPE_META[f].icon}
+              </span>
+              <span className="pill-label">{f === 'all' ? 'ทั้งหมด' : TYPE_META[f].label}</span>
+            </button>
+          ))}
         </div>
         {isAdmin && (
           <button className="btn btn-primary" onClick={() => setModal(true)}>
@@ -380,12 +851,8 @@ export default function AnnouncementsClient({
         )}
       </div>
 
-      {/* Main layout */}
       <div className="ann-layout">
-
-        {/* ── Left: Feed ── */}
         <div>
-          {/* Featured hero (first pinned item) */}
           {featuredAnn && filter === 'all' && (
             <div className="ann-hero fade-up" style={{ backgroundImage: featuredAnn.image_url ? `url(${featuredAnn.image_url})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
               <div className="ann-hero-overlay" />
@@ -411,17 +878,13 @@ export default function AnnouncementsClient({
           )}
         </div>
 
-        {/* ── Right: Sidebar (desktop) ── */}
         <aside className="ann-sidebar">
-          {/* Stat card */}
           <div className="ann-stat-card" style={{ marginBottom: 16 }}>
             <div className="ann-stat-bg">📣</div>
             <div className="ann-stat-label">ประกาศทั้งหมด</div>
             <div className="ann-stat-count">{list.length}</div>
             <div className="ann-stat-sub">{list.filter(a => a.is_important).length} ปักหมุด · {list.filter(a => a.type === 'scores').length} ตารางคะแนน</div>
           </div>
-
-          {/* Recent list */}
           <div className="ann-sidebar-card">
             <div className="ann-sidebar-title">ประกาศสั้นๆ</div>
             {recentList.map(a => {
@@ -442,7 +905,7 @@ export default function AnnouncementsClient({
         </aside>
       </div>
 
-{modal && createPortal(
+      {modal && createPortal(
         <AddAnnouncementModal
           onClose={() => setModal(false)}
           onCreated={a => { setList(p => [a, ...p]); setModal(false) }}
@@ -513,9 +976,7 @@ function AddAnnouncementModal({
           <button className="btn btn-icon btn-ghost" onClick={onClose}><X size={16} /></button>
         </div>
         <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-          {/* Type picker */}
-<div>
+          <div>
             <label className="form-label">ประเภทประกาศ</label>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {([
@@ -563,7 +1024,6 @@ function AddAnnouncementModal({
                 <span style={{ fontSize:13, color:'var(--outline)' }}>{scoresFile?.name ?? 'คลิกเลือกไฟล์ .csv / .xlsx'}</span>
                 <input type="file" accept=".csv,.xlsx,.xls" style={{ display:'none' }} onChange={e => e.target.files?.[0] && onScoresFile(e.target.files[0])} />
               </label>
-              {/* Preview */}
               {preview.length > 0 && (
                 <div style={{ marginTop:10, background:'var(--surface-low)', borderRadius:'var(--r-lg)', padding:'10px 14px', fontSize:12, color:'var(--outline)' }}>
                   <div style={{ fontWeight:700, marginBottom:6 }}>ตัวอย่างข้อมูล ({preview.length} แถวแรก)</div>

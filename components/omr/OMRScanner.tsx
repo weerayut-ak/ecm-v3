@@ -27,10 +27,20 @@ const SCANNER_CSS = `
   /* ป้องกัน scroll ทั้งหน้าเมื่อ scanner เปิดอยู่ */
   body.scanner-open { overflow: hidden; position: fixed; width: 100%; }
 
+  /* ซ่อน nav bar ของแอปเมื่อ scanner เปิดอยู่ */
+  body.scanner-open nav,
+  body.scanner-open [class*="bottom-nav"],
+  body.scanner-open [class*="tab-bar"],
+  body.scanner-open [class*="tabBar"],
+  body.scanner-open [class*="bottomNav"],
+  body.scanner-open footer {
+    display: none !important;
+  }
+
   .scanner-wrap {
     position: fixed; inset: 0;
     background: #0f172a;
-    z-index: 9999;
+    z-index: 99999;
     display: flex;
     flex-direction: column;
     /* ใช้ dvh แทน vh เพื่อรองรับ mobile browser bar */
@@ -277,34 +287,32 @@ function loadOpenCV(): Promise<void> {
   })
 }
 
-/* ── Barcode detection ─────────────────────────────────────────── */
+/* ── QR Code detection ─────────────────────────────────────────── */
 async function detectBarcode(canvas: HTMLCanvasElement): Promise<string | null> {
-  // ลอง BarcodeDetector API (Chrome Android, iOS 17+, Edge)
+  // ลอง BarcodeDetector / jsQR — QR Code หลัก (Chrome Android, iOS 17+, Edge)
   if ('BarcodeDetector' in window) {
     try {
       // @ts-ignore
       const supported: string[] = await (window as any).BarcodeDetector.getSupportedFormats?.() ?? []
-      const wanted = ['code_128','code_39','qr_code','ean_13','upc_a']
+      const wanted = ['qr_code', 'code_128', 'code_39', 'ean_13', 'upc_a']
       const formats = supported.length > 0
         ? wanted.filter(f => supported.includes(f))
         : wanted
       // @ts-ignore
-      const det = new (window as any).BarcodeDetector({ formats: formats.length ? formats : ['code_128','qr_code'] })
+      const det = new (window as any).BarcodeDetector({ formats: formats.length ? formats : ['qr_code', 'code_128'] })
       const codes = await det.detect(canvas)
       if (codes.length > 0) return codes[0].rawValue as string
     } catch { /* fallthrough */ }
   }
 
-  // Fallback: ZXing-js (browser) สำหรับ Firefox / iOS Safari เก่า
+  // Fallback: jsQR สำหรับ Firefox / iOS Safari เก่า
   try {
-    const ZXing = (window as any).ZXing
-    if (ZXing) {
-      const reader = new ZXing.BrowserMultiFormatReader()
-      const img = new Image()
-      img.src = canvas.toDataURL()
-      await new Promise<void>(r => { img.onload = () => r() })
-      const result = await reader.decodeFromImageElement(img).catch(() => null)
-      if (result) return result.text as string
+    const jsQR = (window as any).jsQR
+    if (jsQR) {
+      const ctx = canvas.getContext('2d')!
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const code = jsQR(imageData.data, canvas.width, canvas.height)
+      if (code?.data) return code.data as string
     }
   } catch { /* ignore */ }
 
@@ -403,7 +411,7 @@ function ManualReview({ questions, detected, detectedSerial, onConfirm, onBack }
         borderBottom: `1px solid ${detectedSerial ? 'rgba(5,150,105,0.18)' : 'rgba(245,158,11,0.22)'}`,
       }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: detectedSerial ? '#059669' : '#d97706', whiteSpace: 'nowrap' }}>
-          {detectedSerial ? '🔢 รหัสกระดาษ:' : '⚠️ ไม่พบบาร์โค้ด:'}
+          {detectedSerial ? '🔢 รหัสกระดาษ (QR):' : '⚠️ ไม่พบ QR Code:'}
         </span>
         <input
           value={serial}
@@ -629,9 +637,16 @@ export default function OMRScanner({
     return () => document.body.classList.remove('scanner-open')
   }, [])
 
-  // โหลด OpenCV ล่วงหน้า
+  // โหลด OpenCV ล่วงหน้า + โหลด jsQR สำหรับ fallback QR scanning
   useEffect(() => {
     if (!barcodeOnlyMode) loadOpenCV().then(() => setCvLoaded(true))
+    // โหลด jsQR สำหรับ browser ที่ไม่รองรับ BarcodeDetector
+    if (typeof window !== 'undefined' && !(window as any).jsQR) {
+      const s = document.createElement('script')
+      s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js'
+      s.async = true
+      document.head.appendChild(s)
+    }
   }, [barcodeOnlyMode])
 
   /* ── Capture ── */
@@ -681,7 +696,7 @@ export default function OMRScanner({
           onBarcodeFound?.(val)
           goBackToCamera()
         } else {
-          toast.error('ไม่พบบาร์โค้ด — ลองถ่ายใหม่ให้ชัดขึ้น')
+          toast.error('ไม่พบ QR Code — ลองถ่ายใหม่ให้ชัดขึ้น')
           setStep('preview')
         }
         return
@@ -695,7 +710,7 @@ export default function OMRScanner({
       setDetected(bubbles)
       setDSerial(barcode)
       if (barcode) toast.success(`พบรหัสกระดาษ: ${barcode}`)
-      else toast('ไม่พบบาร์โค้ด — กรอกรหัสเองได้', { icon: 'ℹ️' })
+      else toast('ไม่พบ QR Code — กรอกรหัสเองได้', { icon: 'ℹ️' })
       setStep('result')
     } catch (err: any) {
       console.error(err)
@@ -717,8 +732,8 @@ export default function OMRScanner({
       <div className="scanner-header">
         <button className="scanner-icon-btn" onClick={onClose} aria-label="ปิด">✕</button>
         <div className="scanner-title">
-          <h3>{barcodeOnlyMode ? '🔍 สแกนบาร์โค้ด' : '📷 สแกนกระดาษคำตอบ'}</h3>
-          <p>{quiz.title}{!barcodeOnlyMode && ` · ${mcqs.length} ข้อ`}</p>
+          <h3>{barcodeOnlyMode ? '🔍 สแกน QR Code' : '📷 สแกนกระดาษคำตอบ'}</h3>
+          <p>{barcodeOnlyMode ? 'สแกน QR Code บนกระดาษ' : quiz.title + ' · ' + mcqs.length + ' ข้อ'}</p>
         </div>
 
         {!barcodeOnlyMode && (
@@ -786,7 +801,7 @@ export default function OMRScanner({
                   className="scanner-frame"
                   style={{
                     width: '88%',
-                    aspectRatio: barcodeOnlyMode ? '3.5/1' : '1.41/1',
+                    aspectRatio: barcodeOnlyMode ? '1/1' : '1.41/1',
                   }}
                 >
                   <div className="cam-corner tl" /><div className="cam-corner tr" />
@@ -863,7 +878,7 @@ export default function OMRScanner({
             }}>
               <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: 12, textAlign: 'center', margin: 0, lineHeight: 1.5 }}>
                 {barcodeOnlyMode
-                  ? 'จัดบาร์โค้ดให้อยู่ในแถบ · กดปุ่มเพื่อถ่ายภาพ'
+                  ? 'จัด QR Code ให้อยู่ในกรอบ · กดปุ่มเพื่อถ่ายภาพ'
                   : 'จัดกระดาษให้อยู่ในกรอบ · ถ่ายให้ตรงและชัดเจน'}
               </p>
               <button
@@ -906,7 +921,7 @@ export default function OMRScanner({
                 onClick={processImage}
                 disabled={!barcodeOnlyMode && !cvLoaded}
               >
-                {barcodeOnlyMode ? '🔍 สแกนบาร์โค้ด' : cvLoaded ? '🔍 ตรวจคำตอบ' : '⏳ รอ OpenCV...'}
+                {barcodeOnlyMode ? '🔍 สแกน QR Code' : cvLoaded ? '🔍 ตรวจคำตอบ' : '⏳ รอ OpenCV...'}
               </button>
             </div>
           </div>
@@ -922,10 +937,10 @@ export default function OMRScanner({
             <div className="omr-spinner" />
             <div style={{ textAlign: 'center' }}>
               <p style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>
-                {barcodeOnlyMode ? 'กำลังอ่านบาร์โค้ด...' : 'กำลังตรวจคำตอบ...'}
+                {barcodeOnlyMode ? 'กำลังอ่าน QR Code...' : 'กำลังตรวจคำตอบ...'}
               </p>
               <p style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)' }}>
-                {barcodeOnlyMode ? 'BarcodeDetector API' : 'OpenCV.js กำลังวิเคราะห์ภาพ'}
+                {barcodeOnlyMode ? 'BarcodeDetector / jsQR' : 'OpenCV.js กำลังวิเคราะห์ภาพ'}
               </p>
             </div>
           </div>

@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import toast from 'react-hot-toast'
-import { Camera, Save, TrendingUp, CheckCircle, XCircle, Clock } from 'lucide-react'
+import { Camera, Save, TrendingUp, CheckCircle, XCircle, Clock, BookOpen } from 'lucide-react'
 
 const GRADES = ['ม.1/1','ม.1/2','ม.1/3','ม.2/1','ม.2/2','ม.2/3','ม.3/1','ม.3/2','ม.3/3']
 
@@ -48,6 +48,57 @@ export default function ProfileClient({ profile: init, submissions, userId }: { 
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── คู่มือการใช้งาน Banner ── */}
+      <a
+        href="/dashboard/help"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '14px 20px',
+          borderRadius: 'var(--r-card, 16px)',
+          background: 'linear-gradient(135deg, #0050cb 0%, #0066ff 100%)',
+          color: 'white',
+          textDecoration: 'none',
+          boxShadow: '0 8px 24px rgba(0,80,203,0.20)',
+          transition: 'box-shadow 0.2s, transform 0.2s',
+        }}
+        onMouseEnter={e => {
+          e.currentTarget.style.boxShadow = '0 12px 32px rgba(0,80,203,0.32)'
+          e.currentTarget.style.transform = 'translateY(-1px)'
+        }}
+        onMouseLeave={e => {
+          e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,80,203,0.20)'
+          e.currentTarget.style.transform = 'translateY(0)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: 10,
+            background: 'rgba(255,255,255,0.18)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            flexShrink: 0,
+          }}>
+            <BookOpen size={20} color="white" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 14, lineHeight: 1.3 }}>📘 คู่มือการใช้งาน</div>
+            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+              วิธีใช้งานทุกฟีเจอร์ สำหรับนักเรียนและแอดมิน
+            </div>
+          </div>
+        </div>
+        <div style={{
+          fontSize: 12, fontWeight: 700, opacity: 0.9,
+          background: 'rgba(255,255,255,0.18)',
+          borderRadius: 8, padding: '4px 12px',
+          whiteSpace: 'nowrap',
+        }}>
+          ดูคู่มือ →
+        </div>
+      </a>
+
       {/* Header card */}
       <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '28px 24px', textAlign: 'center' }}>
         {/* Avatar */}
@@ -147,6 +198,7 @@ export default function ProfileClient({ profile: init, submissions, userId }: { 
           </div>
         </div>
       )}
+
       {/* Logout */}
       <button
         onClick={logout}

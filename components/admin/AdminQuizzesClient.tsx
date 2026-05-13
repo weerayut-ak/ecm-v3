@@ -32,6 +32,21 @@ const EMPTY_FORM = {
   is_open: false, opens_at: "", closes_at: "",
 }
 
+// แปลง UTC → local "YYYY-MM-DDTHH:mm" สำหรับ datetime-local input
+function toLocalDateTimeInput(utcString: string | null | undefined): string {
+  if (!utcString) return ""
+  const d = new Date(utcString)
+  if (isNaN(d.getTime())) return ""
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return (
+    d.getFullYear() + "-" +
+    pad(d.getMonth() + 1) + "-" +
+    pad(d.getDate()) + "T" +
+    pad(d.getHours()) + ":" +
+    pad(d.getMinutes())
+  )
+}
+
 export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow[] }) {
   const router = useRouter()
   const supabase = createClient()
@@ -40,7 +55,8 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
   const [editingQuiz, setEditingQuiz]   = useState<QuizRow | null>(null)
   const [form, setForm]                 = useState(EMPTY_FORM)
   const [saving, setSaving]             = useState(false)
-  const [formOpen, setFormOpen]         = useState(false) // mobile toggle
+  const [formOpen, setFormOpen]         = useState(false)
+  const [refreshing, setRefreshing]     = useState(false)          // ✅ state สำหรับ refresh
   const [violationsModal, setViolationsModal] = useState<{ quizId: string; quizTitle: string } | null>(null)
 
   useEffect(() => {
@@ -51,18 +67,34 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
         pass_score: editingQuiz.pass_score ?? 60,
         time_limit: editingQuiz.time_limit ?? "",
         is_open: editingQuiz.is_open ?? false,
-        opens_at: editingQuiz.opens_at ? editingQuiz.opens_at.slice(0, 16) : "",
-        closes_at: editingQuiz.closes_at ? editingQuiz.closes_at.slice(0, 16) : "",
+        opens_at:  toLocalDateTimeInput(editingQuiz.opens_at),
+        closes_at: toLocalDateTimeInput(editingQuiz.closes_at),
       })
       setFormOpen(true)
     } else {
       setForm(EMPTY_FORM)
     }
-  }, [editingQuiz])
+  }, [editingQuiz?.id])
 
   const totalQuizzes   = quizzes.length
   const openQuizzes    = quizzes.filter(q => q.is_open).length
   const totalQuestions = quizzes.reduce((s, q) => s + (q.questions?.[0]?.count ?? 0), 0)
+
+  // ✅ Refresh: ดึงข้อมูลใหม่จาก DB แล้วอัปเดต state
+  async function handleRefresh() {
+    setRefreshing(true)
+    const { data, error } = await supabase
+      .from("quizzes")
+      .select("*, questions(count)")
+      .order("created_at", { ascending: false })
+    if (!error && data) {
+      setQuizzes(data as QuizRow[])
+      toast.success("รีเฟรชแล้ว")
+    } else {
+      toast.error("รีเฟรชไม่สำเร็จ")
+    }
+    setRefreshing(false)
+  }
 
   async function toggleOpen(quiz: QuizRow) {
     await supabase.from("quizzes").update({ is_open: !quiz.is_open }).eq("id", quiz.id)
@@ -81,12 +113,15 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
   async function handleSave() {
     if (!form.title.trim()) { toast.error("กรุณาใส่ชื่อ"); return }
     setSaving(true)
+    // แปลง "YYYY-MM-DDTHH:mm" (local) → ISO string พร้อม timezone ก่อนส่ง Supabase
+    const toISO = (v: string) => v ? new Date(v).toISOString() : null
+
     const payload = {
       title: form.title, description: form.description || null,
       pass_score: Number(form.pass_score),
       time_limit: form.time_limit ? Number(form.time_limit) : null,
       is_open: form.is_open,
-      opens_at: form.opens_at || null, closes_at: form.closes_at || null,
+      opens_at: toISO(form.opens_at), closes_at: toISO(form.closes_at),
     }
     if (editingQuiz) {
       const { data, error } = await supabase.from("quizzes").update(payload).eq("id", editingQuiz.id).select("*, questions(count)").single()
@@ -117,13 +152,25 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
           <h1 className="text-lg font-bold">จัดการแบบทดสอบ</h1>
           <p className="text-xs text-gray-400 mt-0.5">ระบบสร้างและบริหารข้อสอบออนไลน์</p>
         </div>
-        {/* Mobile create button */}
-        <button
-          className="btn btn-sm btn-primary flex items-center gap-1 rounded lg:hidden"
-          onClick={() => { setEditingQuiz(null); setForm(EMPTY_FORM); setFormOpen(p => !p) }}
-        >
-          <Plus size={13} /> สร้าง
-        </button>
+        <div className="flex items-center gap-2">
+          {/* ✅ Refresh button */}
+          <button
+            className="btn btn-sm rounded flex items-center gap-1"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            title="รีเฟรชข้อมูล"
+          >
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+            <span className="hidden sm:inline">{refreshing ? "กำลังโหลด..." : "รีเฟรช"}</span>
+          </button>
+          {/* Mobile create button */}
+          <button
+            className="btn btn-sm btn-primary flex items-center gap-1 rounded lg:hidden"
+            onClick={() => { setEditingQuiz(null); setForm(EMPTY_FORM); setFormOpen(p => !p) }}
+          >
+            <Plus size={13} /> สร้าง
+          </button>
+        </div>
       </div>
 
       {/* ── Stats ── */}
@@ -395,7 +442,6 @@ function ViolationsModal({ quizId, quizTitle, onClose }: { quizId: string; quizT
     >
       <div className="bg-white w-full sm:max-w-lg rounded-t-xl sm:rounded-xl shadow-2xl flex flex-col max-h-[90vh]"
         style={{ background: "var(--surface)" }}>
-        {/* Modal header */}
         <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b shrink-0" style={{ borderColor: "var(--border)" }}>
           <div>
             <h3 className="font-bold text-sm sm:text-base">การออกกลางคัน</h3>
@@ -407,7 +453,6 @@ function ViolationsModal({ quizId, quizTitle, onClose }: { quizId: string; quizT
           </div>
         </div>
 
-        {/* Modal body */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4">
           {loading ? (
             <p className="text-center text-sm text-gray-400 py-8">กำลังโหลด...</p>

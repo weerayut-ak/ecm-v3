@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Clock, CheckCircle, XCircle, Lock, AlertTriangle } from 'lucide-react'
+import RefreshButton from '@/components/RefreshButton'
 
 export default async function QuizzesPage() {
   const supabase = await createClient()
@@ -26,13 +27,38 @@ export default async function QuizzesPage() {
   const submissionMap = new Map(mySubmissions?.map(s => [s.quiz_id, s]) ?? [])
   const sessionMap    = new Map(mySessions?.map(s => [s.quiz_id, s]) ?? [])
 
+  // ── คำนวณ effective open state ณ เวลาปัจจุบัน ──────────────────────────
+  // เพื่อให้นักเรียนเห็นสถานะที่ถูกต้องแม้ is_open ใน DB ยังไม่ได้ sync
+  const now = new Date()
+
+  function getEffectivelyOpen(q: {
+    is_open: boolean
+    opens_at: string | null
+    closes_at: string | null
+  }): boolean {
+    if (q.opens_at && q.closes_at) {
+      // มีตั้งเวลาครบทั้งคู่ → ดูจากช่วงเวลาอย่างเดียว (ไม่สนใจ is_open)
+      return new Date(q.opens_at) <= now && new Date(q.closes_at) >= now
+    }
+    if (q.opens_at) {
+      // มีแค่วันเปิด (ไม่มีวันปิด) → เปิดเมื่อถึงเวลา และไม่มีวันหมด
+      return new Date(q.opens_at) <= now
+    }
+    // ไม่ได้ตั้งตาราง → ใช้ is_open จาก admin โดยตรง
+    return q.is_open
+  }
+  // ────────────────────────────────────────────────────────────────────────
+
   return (
     <div>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 18, fontWeight: 700 }}>แบบทดสอบ</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
-          {quizzes?.filter(q => q.is_open).length ?? 0} ชุดที่เปิดอยู่
-        </p>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, gap: 8 }}>
+        <div>
+          <h1 style={{ fontSize: 18, fontWeight: 700 }}>แบบทดสอบ</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 2 }}>
+            {quizzes?.filter(q => getEffectivelyOpen(q)).length ?? 0} ชุดที่เปิดอยู่
+          </p>
+        </div>
+        <RefreshButton />
       </div>
 
       {quizzes?.length === 0 && (
@@ -44,24 +70,30 @@ export default async function QuizzesPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
         {quizzes?.map(q => {
-          const submission = submissionMap.get(q.id)
-          const session    = sessionMap.get(q.id)
-          const qCount     = (q.questions as { count: number }[])?.[0]?.count ?? 0
-          const leaveCount = session?.leave_count ?? 0
+          const submission      = submissionMap.get(q.id)
+          const session         = sessionMap.get(q.id)
+          const qCount          = (q.questions as { count: number }[])?.[0]?.count ?? 0
+          const leaveCount      = session?.leave_count ?? 0
+          const isBlocked       = session?.status === 'blocked' || leaveCount >= 3
 
-          // ✅ เช็ค blocked จาก status หรือ leave_count >= 3 เหมือนกันทุกที่
-          const isBlocked  = session?.status === 'blocked' || leaveCount >= 3
+          // ✅ ใช้ effectivelyOpen แทน q.is_open ทุกที่ที่เกี่ยวกับนักเรียน
+          const effectivelyOpen = getEffectivelyOpen(q)
+
+          // คำนวณสถานะ schedule เพื่อแสดง label ที่ชัดขึ้น
+          const hasSchedule     = !!(q.opens_at || q.closes_at)
+          const scheduledFuture = q.opens_at ? new Date(q.opens_at) > now : false
+          const scheduledEnded  = q.closes_at ? new Date(q.closes_at) < now : false
 
           return (
             <div key={q.id} className="card" style={{
-              opacity: (!q.is_open && !submission) ? 0.65 : 1,
+              opacity: (!effectivelyOpen && !submission) ? 0.65 : 1,
               display: 'flex', flexDirection: 'column',
             }}>
               {/* Header */}
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10, gap: 8 }}>
                 <h3 style={{ fontWeight: 700, fontSize: 15, lineHeight: 1.4, flex: 1 }}>{q.title}</h3>
-                <span className={`badge flex-shrink-0 ${q.is_open ? 'badge-green' : 'badge-red'}`}>
-                  {q.is_open ? 'เปิด' : 'ปิด'}
+                <span className={`badge flex-shrink-0 ${effectivelyOpen ? 'badge-green' : 'badge-red'}`}>
+                  {effectivelyOpen ? 'เปิด' : scheduledEnded ? 'หมดเวลา' : 'ปิด'}
                 </span>
               </div>
 
@@ -87,9 +119,16 @@ export default async function QuizzesPage() {
                 )}
                 {q.opens_at && (
                   <div style={{ fontSize: 11, color: 'var(--text-3)' }}>
-                    📅 {new Date(q.opens_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
-                    {' – '}
-                    {new Date(q.closes_at!).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' })}
+                    📅 {new Date(q.opens_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                    {q.closes_at && (
+                      <> – {new Date(q.closes_at).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit', hour: '2-digit', minute: '2-digit' })}</>
+                    )}
+                  </div>
+                )}
+                {/* แสดง countdown เมื่อยังไม่ถึงเวลาเปิด */}
+                {hasSchedule && scheduledFuture && (
+                  <div style={{ fontSize: 11, color: 'var(--amber)', fontWeight: 600 }}>
+                    ⏳ ยังไม่ถึงเวลาเปิด
                   </div>
                 )}
               </div>
@@ -128,11 +167,11 @@ export default async function QuizzesPage() {
                     </Link>
                   </div>
                 ) : isBlocked ? (
-                  // ✅ ใช้ <button disabled> ไม่ใช่ <Link> — กันนักเรียนคลิกผ่านได้เด็ดขาด
                   <button className="btn" disabled style={{ width: '100%', justifyContent: 'center', opacity: 0.6, cursor: 'not-allowed' }}>
                     <Lock size={13} /> ถูกล็อค
                   </button>
-                ) : q.is_open ? (
+                ) : effectivelyOpen ? (
+                  // ✅ ใช้ effectivelyOpen แทน q.is_open
                   <Link
                     href={`/dashboard/quizzes/${q.id}/terms`}
                     className="btn btn-primary"
@@ -142,7 +181,7 @@ export default async function QuizzesPage() {
                   </Link>
                 ) : (
                   <button className="btn" disabled style={{ width: '100%', justifyContent: 'center' }}>
-                    ยังไม่เปิด
+                    {scheduledFuture ? '⏳ ยังไม่ถึงเวลา' : scheduledEnded ? 'หมดเวลาแล้ว' : 'ยังไม่เปิด'}
                   </button>
                 )}
               </div>

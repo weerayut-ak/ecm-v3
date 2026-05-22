@@ -221,6 +221,38 @@ export default function QuizAttemptClient({
       setSubmitting(false)
       return
     }
+
+    // 🔔 แจ้งเตือน admin ว่านักเรียนส่งข้อสอบแล้ว
+    try {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('full_name, nickname')
+        .eq('id', userId)
+        .single()
+      const displayName = profile?.nickname || profile?.full_name || 'นักเรียน'
+      const scoreDisplay = score !== null ? `${score.toFixed(1)}%` : 'N/A'
+      await fetch('/api/notifications/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'quiz_submission',
+          title: `${displayName} ส่งแบบทดสอบ "${quiz.title}"`,
+          body: `คะแนน ${scoreDisplay} — ${is_passed ? 'ผ่าน ✓' : 'ไม่ผ่าน ✗'}`,
+          link: '/dashboard/admin/submissions',
+          metadata: {
+            quiz_id: quiz.id,
+            student_id: userId,
+            student_name: displayName,
+            score,
+            is_passed,
+          },
+          target_role: 'admin',
+        }),
+      })
+    } catch {
+      // ไม่ block การ redirect ถ้า notification ล้มเหลว
+    }
+
     router.push(`/dashboard/quizzes/${quiz.id}/result`)
   }
 

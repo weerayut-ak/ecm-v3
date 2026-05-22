@@ -4,9 +4,10 @@ import React, { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { useRouter, usePathname } from 'next/navigation'
-import { Bell, Settings, Menu, Users, BarChart2, Scan, Edit2 } from 'lucide-react'
+import { Settings, Menu, Users, BarChart2, Scan, Edit2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import AppLogo from '@/components/ui/AppLogo'
+import NotificationBell from '@/components/notifications/NotificationBell'
 
 interface Profile {
   full_name: string
@@ -203,13 +204,7 @@ export default function Topbar({
         )}
 
         {/* ปุ่มกระดิ่งแจ้งเตือน */}
-        <button
-          onClick={() => router.push('/under-construction')}
-          title="การแจ้งเตือน"
-          className="hidden h-9 w-9 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-blue-50 sm:flex"
-        >
-          <Bell size={18} />
-        </button>
+        <NotificationBell />
 
         {/* Avatar รูปโปรไฟล์ */}
         <Link href="https://www.facebook.com/love.esthers" target="_blank">

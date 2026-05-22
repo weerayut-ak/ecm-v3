@@ -1,24 +1,25 @@
 import { createClient } from "@/lib/supabase/server"
 import AdminQuestionsClient from "@/components/admin/AdminQuestionsClient"
 
-export default async function QuestionsPage({ params }: { params: { quizId: string } }) {
-  const supabase = await createClient() // ✅ เพิ่ม await
+export default async function QuestionsPage({ params }: { params: Promise<{ quizId: string }> }) {
+  const { quizId } = await params
+  const supabase = await createClient()
 
   const { data: quiz } = await supabase
     .from("quizzes")
     .select("*")
-    .eq("id", params.quizId)
+    .eq("id", quizId)
     .single()
 
   const { data: questions } = await supabase
     .from("questions")
     .select("*")
-    .eq("quiz_id", params.quizId)
+    .eq("quiz_id", quizId)
     .order("sort_order")
 
   return (
     <AdminQuestionsClient
-      quizId={params.quizId}
+      quizId={quizId}
       quizTitle={quiz?.title ?? ""}
       initialQuestions={questions ?? []}
     />

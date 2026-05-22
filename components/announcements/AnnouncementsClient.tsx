@@ -1,5 +1,5 @@
 ﻿'use client'
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import type { Announcement } from '@/types/announcement'
 import { createClient } from '@/lib/supabase/client'
 import { parseExcelOrCSV, normalizeScoreRows } from '@/lib/upload'
@@ -723,6 +723,50 @@ export default function AnnouncementsClient({
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const supabase = createClient()
 
+  // 🔴 Realtime: รับประกาศใหม่ทันทีโดยไม่ต้อง refresh
+  useEffect(() => {
+    const channel = supabase
+      .channel('announcements-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'announcements' },
+        async (payload) => {
+          // ดึงข้อมูลพร้อม author จาก DB เพราะ payload ไม่มี join
+          const { data } = await supabase
+            .from('announcements')
+            .select('*, author:profiles(full_name, nickname)')
+            .eq('id', payload.new.id)
+            .single()
+          if (data) setList((prev) => {
+            if (prev.some((a) => a.id === data.id)) return prev
+            return [data, ...prev]
+          })
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'announcements' },
+        async (payload) => {
+          const { data } = await supabase
+            .from('announcements')
+            .select('*, author:profiles(full_name, nickname)')
+            .eq('id', payload.new.id)
+            .single()
+          if (data) setList((prev) => prev.map((a) => a.id === data.id ? data : a))
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'announcements' },
+        (payload) => {
+          setList((prev) => prev.filter((a) => a.id !== payload.old.id))
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [supabase])
+
   const sorted = [...list].sort((a, b) => {
     if (a.is_important && !b.is_important) return -1
     if (!a.is_important && b.is_important) return 1
@@ -965,6 +1009,23 @@ function AddAnnouncementModal({
 
     if (error || !data) { toast.error('สร้างไม่สำเร็จ'); setSaving(false); return }
     toast.success('สร้างประกาศแล้ว ✓')
+
+    // 🔔 แจ้งเตือนนักเรียนทุกคนว่ามีประกาศใหม่
+    try {
+      await fetch('/api/notifications/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'new_announcement',
+          title: `ประกาศใหม่: "${data.title}"`,
+          body: form.content ? form.content.slice(0, 80) + (form.content.length > 80 ? '…' : '') : undefined,
+          link: '/dashboard/announcements',
+          metadata: { announcement_id: data.id, is_important: form.is_important },
+          target_role: 'student',
+        }),
+      })
+    } catch { /* ไม่ block flow */ }
+
     onCreated(data)
   }
 

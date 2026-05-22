@@ -53,6 +53,28 @@ export default function AddQuizClient() {
     setQuizId(data.id)
     setQuizTitle(data.title)
     toast.success('สร้างแบบทดสอบแล้ว ✓')
+
+    // 🔔 แจ้งเตือนนักเรียนทุกคนว่ามีแบบทดสอบใหม่
+    try {
+      const res = await fetch('/api/notifications/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'new_quiz',
+          title: `แบบทดสอบใหม่: "${data.title}"`,
+          body: data.description || 'มีแบบทดสอบใหม่รอคุณอยู่',
+          link: `/dashboard/quizzes/${data.id}/terms`,
+          metadata: { quiz_id: data.id },
+          target_role: 'student',
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok) console.error('[quiz noti] error:', json)
+      else console.log('[quiz noti] sent:', json)
+    } catch (e) {
+      console.error('[quiz noti] fetch error:', e)
+    }
+
     setStep('questions')
   }
 

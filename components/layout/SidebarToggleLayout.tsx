@@ -3,6 +3,7 @@ import { useState } from 'react'
 import Topbar from '@/components/layout/Topbar'
 import Sidebar from '@/components/layout/Sidebar'
 import MobileNav from '@/components/layout/MobileNav'
+import PushPermissionBanner from '@/components/notifications/PushPermissionBanner'
 
 interface Profile { id: string; full_name: string; nickname?: string | null; role: string; grade?: string | null }
 
@@ -34,6 +35,7 @@ export default function SidebarToggleLayout({ profile, children }: { profile: Pr
 
       {/* Mobile bottom nav */}
       <MobileNav profile={profile} />
+      <PushPermissionBanner />
     </div>
   )
 }

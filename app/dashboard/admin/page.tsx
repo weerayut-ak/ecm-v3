@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import { Users, BookOpen, Megaphone, ClipboardList, Download } from 'lucide-react'
+import { Users, BookOpen, Megaphone, ClipboardList, Download, CalendarDays } from 'lucide-react'
 
 export default async function AdminPage() {
   const supabase = await createClient()
@@ -10,11 +10,13 @@ export default async function AdminPage() {
     { count: quizCount },
     { count: annCount },
     { count: mediaCount },
+    { count: appointmentCount },
   ] = await Promise.all([
     supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student'),
     supabase.from('quizzes').select('*', { count: 'exact', head: true }),
     supabase.from('announcements').select('*', { count: 'exact', head: true }),
     supabase.from('media_items').select('*', { count: 'exact', head: true }),
+    supabase.from('appointments').select('*', { count: 'exact', head: true }),
   ])
 
   const sections = [
@@ -22,6 +24,7 @@ export default async function AdminPage() {
     { href: '/dashboard/admin/media', icon: BookOpen, label: 'สื่อการสอน', value: mediaCount ?? 0, unit: 'รายการ', color: 'bg-green-50 text-green-600' },
     { href: '/dashboard/admin/announcements', icon: Megaphone, label: 'ประกาศ', value: annCount ?? 0, unit: 'ประกาศ', color: 'bg-amber-50 text-amber-600' },
     { href: '/dashboard/admin/quizzes', icon: ClipboardList, label: 'แบบทดสอบ', value: quizCount ?? 0, unit: 'ชุด', color: 'bg-purple-50 text-purple-600' },
+    { href: '/dashboard/admin/appointments', icon: CalendarDays, label: 'การนัดหมาย', value: appointmentCount ?? 0, unit: 'รายการ', color: 'bg-rose-50 text-rose-600' },
   ]
 
   return (

@@ -1,573 +1,471 @@
 'use client'
+
 import { useState } from 'react'
 import { ROLES } from '@/constants/roles'
+import {
+  ArrowLeft, BookOpen, Zap, GraduationCap, ChevronDown,
+  LogIn, LayoutDashboard, Video, Megaphone, ClipboardList,
+  ScanLine, UserCircle, Users, FileText, BarChart2,
+  UploadCloud, Download, ChevronUp,
+} from 'lucide-react'
 
 type Role = typeof ROLES[keyof typeof ROLES]
 type TabId = 'user' | 'admin'
 
 interface Section {
   id: string
-  icon: string
+  icon: React.ReactNode
   title: string
   content: React.ReactNode
 }
 
+// ─── Reusable sub-components ──────────────────────────────────────────────────
+
+function Desc({ children, isAdmin = false }: { children: React.ReactNode; isAdmin?: boolean }) {
+  return (
+    <p className={`text-xs font-semibold leading-relaxed px-3 py-2.5 rounded-xl mb-4 border-l-2 ${
+      isAdmin
+        ? 'bg-violet-50 text-violet-800 border-violet-400'
+        : 'bg-indigo-50 text-indigo-800 border-indigo-400'
+    }`}>
+      {children}
+    </p>
+  )
+}
+
+function Step({
+  num, title, children, isAdmin = false,
+}: { num: string | number; title: string; children: React.ReactNode; isAdmin?: boolean }) {
+  return (
+    <div className="flex gap-3 items-start bg-slate-50/60 rounded-xl p-3">
+      <div className={`w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black text-white flex-shrink-0 ${
+        isAdmin ? 'bg-gradient-to-br from-violet-600 to-violet-800' : 'bg-gradient-to-br from-indigo-500 to-indigo-700'
+      }`}>
+        {num}
+      </div>
+      <div>
+        <p className="text-xs font-bold text-slate-800 mb-0.5">{title}</p>
+        <p className="text-[11px] text-slate-500 leading-relaxed">{children}</p>
+      </div>
+    </div>
+  )
+}
+
+function Tag({ children, red = false }: { children: React.ReactNode; red?: boolean }) {
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-md text-[10px] font-bold border mx-0.5 ${
+      red
+        ? 'bg-rose-50 text-rose-700 border-rose-200'
+        : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    }`}>
+      {children}
+    </span>
+  )
+}
+
+function TipBox({ children, warn = false }: { children: React.ReactNode; warn?: boolean }) {
+  return (
+    <div className={`flex gap-2 items-start text-[11px] font-semibold leading-relaxed rounded-xl px-3.5 py-3 mt-3 border ${
+      warn
+        ? 'bg-rose-50 text-rose-800 border-rose-200'
+        : 'bg-amber-50 text-amber-800 border-amber-200'
+    }`}>
+      <span className="text-base flex-shrink-0">{warn ? '⚠️' : '💡'}</span>
+      <span>{children}</span>
+    </div>
+  )
+}
+
+function InfoRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-3 items-baseline text-[11px] bg-slate-50/60 px-3 py-2.5 rounded-xl">
+      <span className="font-extrabold text-indigo-600 min-w-[130px] flex-shrink-0">{label}</span>
+      <span className="text-slate-600 font-semibold">{children}</span>
+    </div>
+  )
+}
+
+function FeatCard({ icon, title, children, color = 'indigo' }: {
+  icon: string; title: string; children: React.ReactNode
+  color?: 'indigo' | 'emerald' | 'amber' | 'violet'
+}) {
+  const bg = { indigo: 'bg-indigo-50', emerald: 'bg-emerald-50', amber: 'bg-amber-50', violet: 'bg-violet-50' }[color]
+  return (
+    <div className={`${bg} rounded-xl p-3.5 flex gap-3 items-start border border-slate-100`}>
+      <span className="text-xl flex-shrink-0">{icon}</span>
+      <div>
+        <p className="text-xs font-bold text-slate-800 mb-0.5">{title}</p>
+        <p className="text-[11px] text-slate-500 leading-relaxed">{children}</p>
+      </div>
+    </div>
+  )
+}
+
+// ─── Section accordion ────────────────────────────────────────────────────────
+
+function HelpSection({ section, isAdmin, onFocus }: {
+  section: Section; isAdmin: boolean; onFocus: () => void
+}) {
+  const [open, setOpen] = useState(true)
+  return (
+    <div id={section.id} className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden scroll-mt-4" onMouseEnter={onFocus}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50/60 transition-colors text-left"
+      >
+        <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+          isAdmin ? 'bg-violet-50 text-violet-600' : 'bg-indigo-50 text-indigo-600'
+        }`}>
+          {section.icon}
+        </div>
+        <span className="flex-1 text-sm font-bold text-slate-800">{section.title}</span>
+        {open
+          ? <ChevronUp size={15} className="text-slate-400 flex-shrink-0" />
+          : <ChevronDown size={15} className="text-slate-400 flex-shrink-0" />}
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-2 border-t border-slate-50">
+          <div className="pt-4">{section.content}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function HelpClient({ role }: { role: Role }) {
   const isAdmin = role === ROLES.ADMIN
-
-  // นักเรียนเห็นแค่แท็บนักเรียน, แอดมินเริ่มที่แท็บแอดมิน
   const [tab, setTab] = useState<TabId>(isAdmin ? 'admin' : 'user')
-  const [activeSection, setActiveSection] = useState<string>('')
+  const [activeId, setActiveId] = useState('')
 
-  /* ─────────── USER SECTIONS ─────────── */
+  // ── STUDENT SECTIONS ─────────────────────────────────────────────────────────
   const userSections: Section[] = [
     {
-      id: 'login',
-      icon: '🔐',
-      title: 'เข้าสู่ระบบ / ลงทะเบียน',
+      id: 'u-login', icon: <LogIn size={16} />, title: 'เข้าสู่ระบบ / ลงทะเบียน',
       content: (
-        <div>
-          <p className="help-desc">เริ่มต้นใช้งาน The Scholar โดยเข้าสู่ระบบหรือสมัครบัญชีใหม่</p>
-          <div className="step-list">
-            <div className="step">
-              <div className="step-num">1</div>
-              <div>
-                <strong>ลงทะเบียนครั้งแรก</strong>
-                <p>กด <span className="tag">สมัครบัญชี</span> กรอกอีเมล รหัสผ่าน แล้วกด <span className="tag">Register</span></p>
-              </div>
-            </div>
-            <div className="step">
-              <div className="step-num">2</div>
-              <div>
-                <strong>เข้าสู่ระบบ</strong>
-                <p>กรอกอีเมลและรหัสผ่าน แล้วกด <span className="tag">เข้าสู่ระบบ</span></p>
-              </div>
-            </div>
-            <div className="step">
-              <div className="step-num">3</div>
-              <div>
-                <strong>หน้าแดชบอร์ด</strong>
-                <p>ระบบจะพาไปยังหน้าหลัก แสดงสรุปข้อมูลและเมนูด้านซ้าย</p>
-              </div>
-            </div>
-          </div>
-          <div className="tip-box">
-            <span className="tip-icon">💡</span>
-            <span>หากลืมรหัสผ่าน ให้ติดต่อครูผู้สอนเพื่อรีเซ็ตบัญชี</span>
+        <div className="space-y-2">
+          <Desc>เริ่มต้นใช้งาน The Scholar โดยเข้าสู่ระบบหรือสมัครบัญชีใหม่</Desc>
+          <Step num={1} title="ลงทะเบียนครั้งแรก">
+            กด <Tag>สมัครบัญชี</Tag> กรอกอีเมล รหัสผ่าน แล้วกด <Tag>Register</Tag>
+          </Step>
+          <Step num={2} title="เข้าสู่ระบบ">
+            กรอกอีเมลและรหัสผ่าน แล้วกด <Tag>เข้าสู่ระบบ</Tag>
+          </Step>
+          <Step num={3} title="หน้าแดชบอร์ด">
+            ระบบพาไปยังหน้าหลัก แสดงสรุปข้อมูลและเมนูด้านซ้าย
+          </Step>
+          <TipBox>หากลืมรหัสผ่าน ให้ติดต่อครูผู้สอนเพื่อรีเซ็ตบัญชี</TipBox>
+        </div>
+      ),
+    },
+    {
+      id: 'u-dashboard', icon: <LayoutDashboard size={16} />, title: 'หน้าหลัก (Dashboard)',
+      content: (
+        <div className="space-y-2">
+          <Desc>หน้าหลักแสดงภาพรวมและลิงก์ด่วนไปยังฟีเจอร์ต่างๆ</Desc>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <FeatCard icon="📊" title="สถิติส่วนตัว" color="indigo">คะแนนเฉลี่ย จำนวนข้อสอบที่ผ่าน และจำนวนชุดที่ทำแล้ว</FeatCard>
+            <FeatCard icon="📢" title="ประกาศล่าสุด" color="amber">ประกาศจากอาจารย์แสดงที่หน้าหลักทันที</FeatCard>
+            <FeatCard icon="📝" title="ควิซที่เปิดอยู่" color="emerald">ดูรายการแบบทดสอบที่พร้อมทำได้เลย</FeatCard>
+            <FeatCard icon="🎬" title="สื่อการเรียน" color="violet">เข้าถึงวิดีโอและสื่อที่ครูอัปโหลดไว้</FeatCard>
           </div>
         </div>
       ),
     },
     {
-      id: 'dashboard',
-      icon: '🏠',
-      title: 'หน้าหลัก (Dashboard)',
+      id: 'u-media', icon: <Video size={16} />, title: 'สื่อการเรียน',
       content: (
-        <div>
-          <p className="help-desc">หน้าหลักแสดงภาพรวมและลิงก์ด่วนไปยังฟีเจอร์ต่างๆ</p>
-          <div className="feature-grid">
-            <div className="feature-card">
-              <div className="feature-icon">📊</div>
-              <div><strong>สถิติส่วนตัว</strong><p>คะแนนเฉลี่ย จำนวนข้อสอบที่ผ่าน และจำนวนชุดที่ทำแล้ว</p></div>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">📢</div>
-              <div><strong>ประกาศล่าสุด</strong><p>ประกาศจากอาจารย์แสดงที่หน้าหลักทันที</p></div>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">📝</div>
-              <div><strong>ควิซที่เปิดอยู่</strong><p>ดูรายการแบบทดสอบที่พร้อมทำได้เลย</p></div>
-            </div>
-            <div className="feature-card">
-              <div className="feature-icon">🎬</div>
-              <div><strong>สื่อการเรียน</strong><p>เข้าถึงวิดีโอและสื่อที่ครูอัปโหลดไว้</p></div>
-            </div>
+        <div className="space-y-2">
+          <Desc>ดูวิดีโอและเอกสารที่ครูจัดเตรียมไว้</Desc>
+          <Step num={1} title="เข้าเมนูสื่อการเรียน">คลิก <Tag>สื่อการเรียน</Tag> ที่แถบเมนูด้านซ้าย</Step>
+          <Step num={2} title="เลือกสื่อ">คลิกที่การ์ดสื่อที่ต้องการ</Step>
+          <Step num={3} title="ดูเนื้อหา">ระบบเล่นวิดีโอหรือแสดงเอกสารในหน้าจอทันที</Step>
+          <TipBox>รองรับมือถือและแท็บเล็ต — หมุนหน้าจอแนวนอนเพื่อดูสะดวกขึ้น</TipBox>
+        </div>
+      ),
+    },
+    {
+      id: 'u-announce', icon: <Megaphone size={16} />, title: 'ประกาศ',
+      content: (
+        <div className="space-y-2">
+          <Desc>อ่านประกาศจากครู ข่าวสาร และกิจกรรมต่างๆ</Desc>
+          <Step num={1} title="เข้าหน้าประกาศ">คลิก <Tag>ประกาศ</Tag> ที่แถบเมนูด้านซ้าย</Step>
+          <Step num={2} title="อ่านประกาศ">ประกาศเรียงจากใหม่ไปเก่า พร้อมวันที่และหัวข้อ</Step>
+          <TipBox>ตรวจสอบประกาศสม่ำเสมอ ครูจะแจ้งกำหนดสอบและกิจกรรมผ่านที่นี่</TipBox>
+        </div>
+      ),
+    },
+    {
+      id: 'u-quiz', icon: <ClipboardList size={16} />, title: 'ทำแบบทดสอบ (ควิซ)',
+      content: (
+        <div className="space-y-2">
+          <Desc>ทำแบบทดสอบออนไลน์ ดูผลลัพธ์ และสถิติคะแนน</Desc>
+          <Step num={1} title="เลือกแบบทดสอบ">ไปที่ <Tag>ควิซ</Tag> แล้วเลือกชุดข้อสอบที่ต้องการ</Step>
+          <Step num={2} title="อ่านเงื่อนไข">ระบบแสดงกติกา เวลา และคะแนนผ่าน กด <Tag>เริ่มทำข้อสอบ</Tag></Step>
+          <Step num={3} title="ตอบคำถาม">เลือกคำตอบแต่ละข้อ นาฬิกาด้านบนนับเวลาถอยหลัง</Step>
+          <Step num={4} title="ส่งข้อสอบ">กด <Tag>ส่งคำตอบ</Tag> หรือรอเวลาหมด — ระบบส่งอัตโนมัติ</Step>
+          <Step num={5} title="ดูผลลัพธ์">แสดงคะแนน ผ่าน/ไม่ผ่าน ดูประวัติเพิ่มเติมได้ในหน้าโปรไฟล์</Step>
+          <TipBox warn>หากออกจากหน้าระหว่างทำข้อสอบ ระบบจะบันทึกและส่งคำตอบที่ตอบไว้แล้วอัตโนมัติ</TipBox>
+          <div className="space-y-1.5 mt-2">
+            <InfoRow label="⏱ จับเวลา">นับถอยหลัง หมดเวลาส่งอัตโนมัติ</InfoRow>
+            <InfoRow label="✅ คะแนนผ่าน">แต่ละควิซกำหนดต่างกัน ดูได้ที่หน้าเงื่อนไข</InfoRow>
+            <InfoRow label="📋 ประวัติ">ดูผลทุกครั้งได้ในหน้าโปรไฟล์</InfoRow>
           </div>
         </div>
       ),
     },
     {
-      id: 'media',
-      icon: '🎬',
-      title: 'สื่อการเรียน',
+      id: 'u-omr', icon: <ScanLine size={16} />, title: 'OMR (กระดาษคำตอบ)',
       content: (
-        <div>
-          <p className="help-desc">ดูวิดีโอและเอกสารที่ครูจัดเตรียมไว้</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>เข้าเมนูสื่อการเรียน</strong><p>คลิก <span className="tag">สื่อการเรียน</span> ที่แถบเมนูด้านซ้าย</p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>เลือกสื่อ</strong><p>คลิกที่การ์ดสื่อที่ต้องการ</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>ดูเนื้อหา</strong><p>ระบบเล่นวิดีโอหรือแสดงเอกสารในหน้าจอ</p></div></div>
-          </div>
-          <div className="tip-box">
-            <span className="tip-icon">📱</span>
-            <span>รองรับมือถือและแท็บเล็ต — หมุนหน้าจอแนวนอนเพื่อดูสะดวกขึ้น</span>
-          </div>
+        <div className="space-y-2">
+          <Desc>ระบบ OMR ใช้สำหรับส่งกระดาษคำตอบแบบระบายวงกลม</Desc>
+          <Step num={1} title="รับกระดาษคำตอบ">ครูจะแจกกระดาษ OMR พร้อมแจ้งวิธีส่ง</Step>
+          <Step num={2} title="ระบายให้ชัดเจน">ใช้ปากกาหรือดินสอระบายเต็มวง ไม่มีรอยลบ</Step>
+          <Step num={3} title="ดูผลคะแนน">หลังครูสแกน ผลคะแนนจะปรากฏในหน้าโปรไฟล์ของคุณ</Step>
         </div>
       ),
     },
     {
-      id: 'announcements',
-      icon: '📢',
-      title: 'ประกาศ',
+      id: 'u-profile', icon: <UserCircle size={16} />, title: 'โปรไฟล์',
       content: (
-        <div>
-          <p className="help-desc">อ่านประกาศจากครู ข่าวสาร และกิจกรรมต่างๆ</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>เข้าหน้าประกาศ</strong><p>คลิก <span className="tag">ประกาศ</span> ที่แถบเมนูด้านซ้าย</p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>อ่านประกาศ</strong><p>เรียงจากใหม่ไปเก่า พร้อมวันที่และหัวข้อ</p></div></div>
+        <div className="space-y-2">
+          <Desc>แก้ไขข้อมูลส่วนตัว ดูประวัติการสอบ และตั้งค่าบัญชี</Desc>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <FeatCard icon="📸" title="เปลี่ยนรูปโปรไฟล์" color="indigo">กดไอคอนกล้องที่รูป แล้วเลือกภาพจากเครื่อง</FeatCard>
+            <FeatCard icon="✏️" title="แก้ไขข้อมูล" color="emerald">แก้ชื่อ ชื่อเล่น รหัสนักเรียน ระดับชั้น แล้วกด <Tag>บันทึก</Tag></FeatCard>
+            <FeatCard icon="📊" title="สถิติคะแนน" color="amber">คะแนนเฉลี่ย จำนวนชุดที่ผ่านและทำแล้ว</FeatCard>
+            <FeatCard icon="📋" title="ประวัติการสอบ" color="violet">ดูผลทุกครั้ง พร้อมคะแนนและวันที่ กรองและค้นหาได้</FeatCard>
           </div>
-          <div className="tip-box">
-            <span className="tip-icon">🔔</span>
-            <span>ตรวจสอบประกาศสม่ำเสมอ ครูจะแจ้งกำหนดสอบและกิจกรรมผ่านที่นี่</span>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'quizzes',
-      icon: '📝',
-      title: 'ทำแบบทดสอบ (ควิซ)',
-      content: (
-        <div>
-          <p className="help-desc">ทำแบบทดสอบออนไลน์ ดูผลลัพธ์ และสถิติคะแนน</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>เลือกแบบทดสอบ</strong><p>ไปที่ <span className="tag">ควิซ</span> แล้วเลือกชุดข้อสอบที่ต้องการ</p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>อ่านเงื่อนไข</strong><p>ระบบแสดงกติกา เวลา และคะแนนผ่าน กด <span className="tag">เริ่มทำข้อสอบ</span></p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>ตอบคำถาม</strong><p>เลือกคำตอบแต่ละข้อ นาฬิกาด้านบนนับเวลาถอยหลัง</p></div></div>
-            <div className="step"><div className="step-num">4</div><div><strong>ส่งข้อสอบ</strong><p>กด <span className="tag">ส่งคำตอบ</span> หรือรอเวลาหมด ระบบส่งอัตโนมัติ</p></div></div>
-            <div className="step"><div className="step-num">5</div><div><strong>ดูผลลัพธ์</strong><p>แสดงคะแนน ผ่าน/ไม่ผ่าน ดูประวัติเพิ่มเติมได้ในหน้าโปรไฟล์</p></div></div>
-          </div>
-          <div className="warning-box">
-            <span className="tip-icon">⚠️</span>
-            <span>หากออกจากหน้าระหว่างทำข้อสอบ ระบบจะบันทึกและส่งคำตอบที่ตอบไว้แล้วอัตโนมัติ</span>
-          </div>
-          <div className="info-grid" style={{marginTop:'14px'}}>
-            <div className="info-item"><span className="info-label">⏱ จับเวลา</span><span>นับถอยหลัง หมดเวลาส่งอัตโนมัติ</span></div>
-            <div className="info-item"><span className="info-label">✅ คะแนนผ่าน</span><span>แต่ละควิซกำหนดต่างกัน ดูได้ที่หน้าเงื่อนไข</span></div>
-            <div className="info-item"><span className="info-label">📋 ประวัติ</span><span>ดูผลทุกครั้งได้ในหน้าโปรไฟล์</span></div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'omr-student',
-      icon: '🔲',
-      title: 'OMR (กระดาษคำตอบ)',
-      content: (
-        <div>
-          <p className="help-desc">ระบบ OMR ใช้สำหรับส่งกระดาษคำตอบแบบระบายวงกลม</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>รับกระดาษคำตอบ</strong><p>ครูจะแจกกระดาษ OMR พร้อมแจ้งวิธีส่ง</p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>ระบายให้ชัดเจน</strong><p>ใช้ปากกาหรือดินสอระบายเต็มวง ไม่มีรอยลบ</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>ดูผลคะแนน</strong><p>หลังครูสแกน ผลคะแนนจะปรากฏในหน้าโปรไฟล์ของคุณ</p></div></div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'profile-user',
-      icon: '👤',
-      title: 'โปรไฟล์',
-      content: (
-        <div>
-          <p className="help-desc">แก้ไขข้อมูลส่วนตัว ดูประวัติการสอบ และตั้งค่าบัญชี</p>
-          <div className="feature-grid">
-            <div className="feature-card"><div className="feature-icon">📸</div><div><strong>เปลี่ยนรูปโปรไฟล์</strong><p>กดไอคอนกล้องที่รูป แล้วเลือกภาพจากเครื่อง</p></div></div>
-            <div className="feature-card"><div className="feature-icon">✏️</div><div><strong>แก้ไขข้อมูล</strong><p>แก้ชื่อ ชื่อเล่น รหัสนักเรียน ระดับชั้น แล้วกด <span className="tag">บันทึก</span></p></div></div>
-            <div className="feature-card"><div className="feature-icon">📊</div><div><strong>สถิติคะแนน</strong><p>ดูคะแนนเฉลี่ย จำนวนชุดที่ผ่านและทำแล้ว</p></div></div>
-            <div className="feature-card"><div className="feature-icon">📋</div><div><strong>ประวัติการสอบ</strong><p>ดูผลทุกครั้ง พร้อมคะแนนและวันที่</p></div></div>
-          </div>
-          <div className="step-list" style={{marginTop:'14px'}}>
-            <div className="step">
-              <div className="step-num" style={{background:'#ef4444'}}>!</div>
-              <div><strong>ออกจากระบบ</strong><p>กดปุ่ม <span className="tag tag-red">ออกจากระบบ</span> ที่ด้านล่างหน้าโปรไฟล์</p></div>
-            </div>
-          </div>
+          <TipBox warn>กด <Tag red>ออกจากระบบ</Tag> ที่ด้านล่างหน้าโปรไฟล์เพื่อออกจากบัญชี</TipBox>
         </div>
       ),
     },
   ]
 
-  /* ─────────── ADMIN SECTIONS ─────────── */
+  // ── ADMIN SECTIONS ────────────────────────────────────────────────────────────
   const adminSections: Section[] = [
     {
-      id: 'admin-overview',
-      icon: '⚡',
-      title: 'Admin Dashboard ภาพรวม',
+      id: 'a-overview', icon: <Zap size={16} />, title: 'Admin Dashboard ภาพรวม',
       content: (
-        <div>
-          <p className="help-desc">Admin Panel แสดงสถิติรวมและทางลัดสู่การจัดการทุกส่วน</p>
-          <div className="feature-grid">
-            <div className="feature-card blue"><div className="feature-icon">👥</div><div><strong>จำนวนนักเรียน</strong><p>บัญชีนักเรียนทั้งหมดในระบบ</p></div></div>
-            <div className="feature-card green"><div className="feature-icon">📚</div><div><strong>สื่อการสอน</strong><p>จำนวนสื่อ/วิดีโอที่อัปโหลดไว้</p></div></div>
-            <div className="feature-card amber"><div className="feature-icon">📢</div><div><strong>ประกาศ</strong><p>จำนวนประกาศทั้งหมดในระบบ</p></div></div>
-            <div className="feature-card purple"><div className="feature-icon">📝</div><div><strong>แบบทดสอบ</strong><p>จำนวนควิซที่สร้างไว้</p></div></div>
+        <div className="space-y-2">
+          <Desc isAdmin>Admin Panel แสดงสถิติรวมและทางลัดสู่การจัดการทุกส่วน</Desc>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <FeatCard icon="👥" title="จำนวนนักเรียน" color="indigo">บัญชีนักเรียนทั้งหมดในระบบ</FeatCard>
+            <FeatCard icon="📚" title="สื่อการสอน" color="emerald">จำนวนสื่อ/วิดีโอที่อัปโหลดไว้</FeatCard>
+            <FeatCard icon="📢" title="ประกาศ" color="amber">จำนวนประกาศทั้งหมดในระบบ</FeatCard>
+            <FeatCard icon="📝" title="แบบทดสอบ" color="violet">จำนวนควิซที่สร้างไว้</FeatCard>
           </div>
-          <div className="tip-box" style={{marginTop:'14px'}}>
-            <span className="tip-icon">📊</span>
-            <span>กด <strong>นำออกรายงานคะแนน</strong> ที่ Admin Panel เพื่อ Download คะแนนเป็น Excel</span>
+          <TipBox>กด <Tag>นำออกรายงานคะแนน</Tag> ที่ Admin Panel เพื่อดาวน์โหลดคะแนนทั้งหมดเป็น Excel</TipBox>
+        </div>
+      ),
+    },
+    {
+      id: 'a-students', icon: <Users size={16} />, title: 'จัดการนักเรียน',
+      content: (
+        <div className="space-y-2">
+          <Desc isAdmin>เพิ่ม แก้ไข ลบ และค้นหาข้อมูลนักเรียนในระบบ</Desc>
+          <Step num="+" title="เพิ่มนักเรียน" isAdmin>ไปที่ <Tag>นักเรียน</Tag> → <Tag>เพิ่มนักเรียน</Tag> กรอกอีเมล รหัสผ่าน ชื่อ และระดับชั้น</Step>
+          <Step num="✎" title="แก้ไขข้อมูล" isAdmin>คลิกที่แถวนักเรียน แก้ข้อมูล แล้วกด <Tag>บันทึก</Tag></Step>
+          <Step num="🗑" title="ลบนักเรียน" isAdmin>เลือก checkbox → <Tag red>ลบที่เลือก</Tag> ระบบขอยืนยันก่อนเสมอ</Step>
+          <Step num="🔍" title="ค้นหา/กรอง" isAdmin>พิมพ์ชื่อหรือรหัสในช่องค้นหา หรือกรองตามระดับชั้น</Step>
+          <TipBox warn>การลบนักเรียนจะลบข้อมูลและประวัติสอบทั้งหมด — ไม่สามารถกู้คืนได้</TipBox>
+        </div>
+      ),
+    },
+    {
+      id: 'a-media', icon: <Video size={16} />, title: 'จัดการสื่อการสอน',
+      content: (
+        <div className="space-y-2">
+          <Desc isAdmin>อัปโหลดและจัดการสื่อการสอนสำหรับนักเรียน</Desc>
+          <Step num={1} title="เพิ่มสื่อใหม่" isAdmin><Tag>Admin Panel</Tag> → <Tag>สื่อการสอน</Tag> → <Tag>เพิ่มสื่อ</Tag></Step>
+          <Step num={2} title="กรอกข้อมูล" isAdmin>ใส่ชื่อ รายละเอียด URL วิดีโอ (YouTube/Vimeo) หรืออัปโหลดไฟล์</Step>
+          <Step num={3} title="บันทึก" isAdmin>กด <Tag>บันทึก</Tag> สื่อจะปรากฏในหน้านักเรียนทันที</Step>
+        </div>
+      ),
+    },
+    {
+      id: 'a-announce', icon: <Megaphone size={16} />, title: 'จัดการประกาศ',
+      content: (
+        <div className="space-y-2">
+          <Desc isAdmin>สร้างและจัดการประกาศที่นักเรียนจะเห็น</Desc>
+          <Step num={1} title="สร้างประกาศ" isAdmin><Tag>Admin Panel</Tag> → <Tag>ประกาศ</Tag> → <Tag>เพิ่มประกาศ</Tag></Step>
+          <Step num={2} title="กรอกเนื้อหา" isAdmin>ใส่หัวข้อ รายละเอียด และแนบรูปภาพได้</Step>
+          <Step num={3} title="เผยแพร่" isAdmin>กด <Tag>บันทึก</Tag> นักเรียนเห็นทันที</Step>
+          <Step num="✎" title="แก้ไข/ลบ" isAdmin>คลิกไอคอนดินสอหรือถังขยะในแถวประกาศที่ต้องการ</Step>
+        </div>
+      ),
+    },
+    {
+      id: 'a-quiz', icon: <ClipboardList size={16} />, title: 'จัดการแบบทดสอบ',
+      content: (
+        <div className="space-y-2">
+          <Desc isAdmin>สร้างควิซ เพิ่มคำถาม กำหนดเวลา และเปิด-ปิดการสอบ</Desc>
+          <Step num={1} title="สร้างควิซ" isAdmin><Tag>Admin Panel</Tag> → <Tag>แบบทดสอบ</Tag> → <Tag>เพิ่มแบบทดสอบ</Tag></Step>
+          <Step num={2} title="ตั้งค่าทั่วไป" isAdmin>ชื่อ · คำอธิบาย · คะแนนผ่าน (%) · เวลาจำกัด (นาที) · วันที่เปิด-ปิด</Step>
+          <Step num={3} title="เพิ่มคำถาม" isAdmin>กด <Tag>เพิ่มคำถาม</Tag> ใส่คำถาม ตัวเลือก A-D และระบุเฉลย</Step>
+          <Step num={4} title="เปิด/ปิดการสอบ" isAdmin>Toggle <Tag>เปิดให้ทำ</Tag> เพื่อควบคุมการเข้าถึงของนักเรียน</Step>
+          <Step num={5} title="ดูตัวอย่าง" isAdmin>กด <Tag>Preview</Tag> เพื่อดูหน้าตาก่อนเผยแพร่</Step>
+          <div className="space-y-1.5 mt-2">
+            <InfoRow label="📌 คะแนนผ่าน">กำหนดเป็น % เช่น 70 = ต้องได้ 70% ขึ้นไป</InfoRow>
+            <InfoRow label="⏱ เวลาจำกัด">ระบุเป็นนาที — ว่างเปล่า = ไม่จับเวลา</InfoRow>
+            <InfoRow label="📅 วันเปิด-ปิด">ระบบเปิด-ปิดอัตโนมัติตามวันที่ที่กำหนด</InfoRow>
           </div>
         </div>
       ),
     },
     {
-      id: 'admin-students',
-      icon: '👥',
-      title: 'จัดการนักเรียน',
+      id: 'a-submissions', icon: <BarChart2 size={16} />, title: 'ประวัติการสอบ (Submissions)',
       content: (
-        <div>
-          <p className="help-desc">เพิ่ม แก้ไข ลบ และค้นหาข้อมูลนักเรียนในระบบ</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">+</div><div><strong>เพิ่มนักเรียน</strong><p>ไปที่ <span className="tag">นักเรียน</span> → <span className="tag">เพิ่มนักเรียน</span> กรอกอีเมล รหัสผ่าน ชื่อ และระดับชั้น</p></div></div>
-            <div className="step"><div className="step-num">✎</div><div><strong>แก้ไขข้อมูล</strong><p>คลิกที่แถวนักเรียน แก้ข้อมูล แล้วกด <span className="tag">บันทึก</span></p></div></div>
-            <div className="step"><div className="step-num">🗑</div><div><strong>ลบนักเรียน</strong><p>เลือก checkbox → <span className="tag tag-red">ลบที่เลือก</span> — ระบบขอยืนยันก่อนเสมอ</p></div></div>
-            <div className="step"><div className="step-num">🔍</div><div><strong>ค้นหา/กรอง</strong><p>พิมพ์ชื่อหรือรหัสในช่องค้นหา หรือกรองตามระดับชั้น</p></div></div>
-          </div>
-          <div className="warning-box">
-            <span className="tip-icon">⚠️</span>
-            <span>การลบนักเรียนจะลบข้อมูลและประวัติสอบทั้งหมด — ไม่สามารถกู้คืนได้</span>
+        <div className="space-y-2">
+          <Desc isAdmin>ดูและจัดการผลการสอบของนักเรียนทั้งหมด</Desc>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <FeatCard icon="🔍" title="ค้นหา/กรอง" color="indigo">ค้นตามชื่อ รหัส หรือกรองตามควิซ/ระดับชั้น</FeatCard>
+            <FeatCard icon="👁" title="ดูรายละเอียด" color="emerald">คลิกแถวเพื่อดูคำตอบและผลของแต่ละคน</FeatCard>
+            <FeatCard icon="🗑" title="ลบบันทึก" color="amber">เลือก checkbox แล้วกดลบประวัติที่ไม่ต้องการ</FeatCard>
+            <FeatCard icon="📈" title="สถิติรวม" color="violet">แถบด้านบนแสดงเฉลี่ย ผ่าน/ไม่ผ่านของกลุ่มที่กรองอยู่</FeatCard>
           </div>
         </div>
       ),
     },
     {
-      id: 'admin-media',
-      icon: '📚',
-      title: 'จัดการสื่อการสอน',
+      id: 'a-omr', icon: <ScanLine size={16} />, title: 'OMR สแกน',
       content: (
-        <div>
-          <p className="help-desc">อัปโหลดและจัดการสื่อการสอนสำหรับนักเรียน</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>เพิ่มสื่อใหม่</strong><p><span className="tag">Admin Panel</span> → <span className="tag">สื่อการสอน</span> → <span className="tag">เพิ่มสื่อ</span></p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>กรอกข้อมูล</strong><p>ใส่ชื่อ รายละเอียด URL วิดีโอ (YouTube/Vimeo) หรืออัปโหลดไฟล์</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>บันทึก</strong><p>กด <span className="tag">บันทึก</span> สื่อจะปรากฏในหน้านักเรียนทันที</p></div></div>
-          </div>
+        <div className="space-y-2">
+          <Desc isAdmin>สแกนกระดาษคำตอบ OMR อัตโนมัติ บันทึกคะแนนได้รวดเร็ว</Desc>
+          <Step num={1} title="เข้าหน้า OMR สแกน" isAdmin>คลิก <Tag>OMR สแกน</Tag> ที่แถบเมนูส่วน Admin</Step>
+          <Step num={2} title="เลือกแบบทดสอบ" isAdmin>เลือกควิซ — ระบบโหลดเฉลยมาให้อัตโนมัติ</Step>
+          <Step num={3} title="สแกนกระดาษ" isAdmin>ใช้กล้องหรืออัปโหลดภาพ ระบบประมวลผลและตรวจคะแนน</Step>
+          <Step num={4} title="ยืนยันและบันทึก" isAdmin>ตรวจสอบความถูกต้อง แล้วกด <Tag>บันทึกคะแนน</Tag></Step>
+          <TipBox>ถ่ายในที่สว่าง วางกระดาษตรง — ช่วยให้ระบบอ่านได้แม่นยำขึ้น</TipBox>
         </div>
       ),
     },
     {
-      id: 'admin-announcements',
-      icon: '📢',
-      title: 'จัดการประกาศ',
+      id: 'a-export', icon: <Download size={16} />, title: 'นำออกข้อมูล (Export)',
       content: (
-        <div>
-          <p className="help-desc">สร้างและจัดการประกาศที่นักเรียนจะเห็น</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>สร้างประกาศ</strong><p><span className="tag">Admin Panel</span> → <span className="tag">ประกาศ</span> → <span className="tag">เพิ่มประกาศ</span></p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>กรอกเนื้อหา</strong><p>ใส่หัวข้อ รายละเอียด และแนบรูปภาพได้</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>เผยแพร่</strong><p>กด <span className="tag">บันทึก</span> นักเรียนเห็นทันที</p></div></div>
-            <div className="step"><div className="step-num">✎</div><div><strong>แก้ไข/ลบ</strong><p>คลิกไอคอนดินสอหรือถังขยะในแถวประกาศที่ต้องการ</p></div></div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'admin-quizzes',
-      icon: '📝',
-      title: 'จัดการแบบทดสอบ',
-      content: (
-        <div>
-          <p className="help-desc">สร้างควิซ เพิ่มคำถาม กำหนดเวลา และเปิด-ปิดการสอบ</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>สร้างควิซ</strong><p><span className="tag">Admin Panel</span> → <span className="tag">แบบทดสอบ</span> → <span className="tag">เพิ่มแบบทดสอบ</span></p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>ตั้งค่าทั่วไป</strong><p>ชื่อ · คำอธิบาย · คะแนนผ่าน (%) · เวลาจำกัด (นาที) · วันที่เปิด-ปิด</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>เพิ่มคำถาม</strong><p>กด <span className="tag">เพิ่มคำถาม</span> ใส่คำถาม ตัวเลือก A-D และระบุเฉลย</p></div></div>
-            <div className="step"><div className="step-num">4</div><div><strong>เปิด/ปิดการสอบ</strong><p>Toggle <span className="tag">เปิดให้ทำ</span> เพื่อควบคุมการเข้าถึงของนักเรียน</p></div></div>
-            <div className="step"><div className="step-num">5</div><div><strong>ดูตัวอย่าง</strong><p>กด <span className="tag">Preview</span> เพื่อดูหน้าตาก่อนเผยแพร่</p></div></div>
-          </div>
-          <div className="info-grid">
-            <div className="info-item"><span className="info-label">📌 คะแนนผ่าน</span><span>กำหนดเป็น % เช่น 60 = ต้องได้ 60% ขึ้นไป</span></div>
-            <div className="info-item"><span className="info-label">⏱ เวลาจำกัด</span><span>ระบุเป็นนาที — ว่างเปล่า = ไม่จับเวลา</span></div>
-            <div className="info-item"><span className="info-label">📅 วันเปิด-ปิด</span><span>ระบบเปิด-ปิดอัตโนมัติตามวันที่ที่กำหนด</span></div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'admin-submissions',
-      icon: '📊',
-      title: 'ประวัติการสอบ',
-      content: (
-        <div>
-          <p className="help-desc">ดูและจัดการผลการสอบของนักเรียนทั้งหมด</p>
-          <div className="feature-grid">
-            <div className="feature-card"><div className="feature-icon">🔍</div><div><strong>ค้นหา/กรอง</strong><p>ค้นตามชื่อ รหัส หรือกรองตามควิซ/ระดับชั้น</p></div></div>
-            <div className="feature-card"><div className="feature-icon">👁</div><div><strong>ดูรายละเอียด</strong><p>คลิกแถวเพื่อดูคำตอบและผลของแต่ละคน</p></div></div>
-            <div className="feature-card"><div className="feature-icon">🗑</div><div><strong>ลบบันทึก</strong><p>เลือก checkbox แล้วกดลบเพื่อลบประวัติที่ไม่ต้องการ</p></div></div>
-            <div className="feature-card"><div className="feature-icon">📈</div><div><strong>สถิติรวม</strong><p>แถบด้านบนแสดงเฉลี่ย ผ่าน/ไม่ผ่านของกลุ่มที่กรองอยู่</p></div></div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'admin-omr',
-      icon: '🔲',
-      title: 'OMR สแกน',
-      content: (
-        <div>
-          <p className="help-desc">สแกนกระดาษคำตอบ OMR อัตโนมัติ บันทึกคะแนนได้รวดเร็ว</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>เข้าหน้า OMR สแกน</strong><p>คลิก <span className="tag">OMR สแกน</span> ที่แถบเมนูส่วน Admin</p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>เลือกแบบทดสอบ</strong><p>เลือกควิซ — ระบบโหลดเฉลยมาให้อัตโนมัติ</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>สแกนกระดาษ</strong><p>ใช้กล้องหรืออัปโหลดภาพ ระบบประมวลผลและตรวจคะแนน</p></div></div>
-            <div className="step"><div className="step-num">4</div><div><strong>ยืนยันและบันทึก</strong><p>ตรวจสอบความถูกต้อง แล้วกด <span className="tag">บันทึกคะแนน</span></p></div></div>
-          </div>
-          <div className="tip-box">
-            <span className="tip-icon">💡</span>
-            <span>ถ่ายในที่สว่าง วางกระดาษตรง — ช่วยให้ระบบอ่านได้แม่นยำขึ้น</span>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'admin-export',
-      icon: '📥',
-      title: 'นำออกข้อมูล (Export)',
-      content: (
-        <div>
-          <p className="help-desc">ดาวน์โหลดรายงานคะแนนเป็นไฟล์ Excel/CSV</p>
-          <div className="step-list">
-            <div className="step"><div className="step-num">1</div><div><strong>เข้าหน้า Export</strong><p><span className="tag">Admin Panel</span> → <span className="tag">นำออกรายงานคะแนน</span></p></div></div>
-            <div className="step"><div className="step-num">2</div><div><strong>เลือกตัวกรอง</strong><p>เลือกควิซหรือระดับชั้นที่ต้องการ</p></div></div>
-            <div className="step"><div className="step-num">3</div><div><strong>ดาวน์โหลด</strong><p>กด <span className="tag">Download</span> ไฟล์จะถูกบันทึกในเครื่องทันที</p></div></div>
-          </div>
-          <div className="info-grid">
-            <div className="info-item"><span className="info-label">📋 ข้อมูลที่ได้</span><span>ชื่อ รหัส ระดับชั้น คะแนน ผ่าน/ไม่ผ่าน วันที่สอบ</span></div>
-          </div>
+        <div className="space-y-2">
+          <Desc isAdmin>ดาวน์โหลดรายงานคะแนนเป็นไฟล์ Excel/CSV</Desc>
+          <Step num={1} title="เข้าหน้า Export" isAdmin><Tag>Admin Panel</Tag> → <Tag>นำออกรายงานคะแนน</Tag></Step>
+          <Step num={2} title="เลือกตัวกรอง" isAdmin>เลือกควิซหรือระดับชั้นที่ต้องการ</Step>
+          <Step num={3} title="ดาวน์โหลด" isAdmin>กด <Tag>Download</Tag> ไฟล์บันทึกในเครื่องทันที</Step>
+          <InfoRow label="📋 ข้อมูลที่ได้">ชื่อ รหัส ระดับชั้น คะแนน ผ่าน/ไม่ผ่าน วันที่สอบ</InfoRow>
         </div>
       ),
     },
   ]
 
-  // นักเรียนเห็นแค่ userSections, แอดมินเห็นได้ทั้งคู่
   const sections = tab === 'user' ? userSections : adminSections
 
   return (
-    <>
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700;800&display=swap');
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Sarabun', sans-serif; background: #f0f4ff; color: #1a1f36; }
+    <div className="min-h-screen bg-slate-50/50 text-slate-800 p-4 sm:p-6 md:p-8 font-sans">
+      <div className="max-w-5xl mx-auto flex flex-col gap-5">
 
-        .help-page { max-width: 900px; margin: 0 auto; padding: 32px 20px 60px; }
+        {/* ── HERO ── */}
+        <div className={`relative overflow-hidden rounded-3xl p-6 sm:p-8 text-white shadow-sm ${
+          isAdmin
+            ? 'bg-gradient-to-r from-violet-700 via-violet-600 to-indigo-600'
+            : 'bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-700'
+        }`}>
+          <div className="absolute top-0 right-0 w-56 h-56 bg-white/10 rounded-full blur-2xl -mr-16 -mt-16" />
 
-        /* Hero */
-        .help-hero {
-          border-radius: 20px; padding: 36px 32px; color: white; margin-bottom: 28px;
-          position: relative; overflow: hidden;
-        }
-        .help-hero.student-hero { background: linear-gradient(135deg, #0050cb 0%, #0066ff 60%, #338aff 100%); }
-        .help-hero.admin-hero  { background: linear-gradient(135deg, #5b21b6 0%, #7c3aed 60%, #9333ea 100%); }
-        .help-hero::before {
-          content:''; position:absolute; top:-40px; right:-40px; width:200px; height:200px;
-          background:rgba(255,255,255,0.07); border-radius:50%;
-        }
-        .help-hero-badge {
-          display:inline-flex; align-items:center; gap:6px;
-          background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25);
-          border-radius:20px; padding:4px 12px; font-size:12px; font-weight:600;
-          margin-bottom:12px;
-        }
-        .help-hero h1 { font-size:26px; font-weight:800; line-height:1.2; margin-bottom:8px; }
-        .help-hero p  { font-size:13px; opacity:0.85; line-height:1.6; }
-        .back-btn {
-          display:inline-flex; align-items:center; gap:8px;
-          background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.25);
-          color:white; border-radius:10px; padding:8px 16px; font-size:13px;
-          font-weight:600; cursor:pointer; text-decoration:none; margin-top:16px;
-          font-family:inherit; transition:background 0.2s;
-        }
-        .back-btn:hover { background:rgba(255,255,255,0.25); }
-
-        /* Role badge (admin only) */
-        .role-banner {
-          display:flex; align-items:center; gap:10px;
-          background:#faf5ff; border:1px solid #e9d5ff;
-          border-radius:12px; padding:10px 16px;
-          font-size:13px; color:#6b21a8; font-weight:600;
-          margin-bottom:20px;
-        }
-
-        /* Tabs — only for admin */
-        .tab-bar {
-          display:flex; gap:8px; margin-bottom:24px;
-          background:white; border-radius:14px; padding:6px;
-          box-shadow:0 2px 12px rgba(0,0,0,0.06);
-        }
-        .tab-btn {
-          flex:1; padding:10px 20px; border:none; border-radius:10px;
-          font-size:14px; font-weight:700; cursor:pointer; transition:all 0.2s;
-          font-family:inherit; display:flex; align-items:center; justify-content:center; gap:8px;
-          background:transparent; color:#64748b;
-        }
-        .tab-btn.tab-user.active  { background:linear-gradient(135deg,#0050cb,#0066ff); color:white; box-shadow:0 4px 16px rgba(0,80,203,0.25); }
-        .tab-btn.tab-admin.active { background:linear-gradient(135deg,#7c3aed,#9333ea); color:white; box-shadow:0 4px 16px rgba(124,58,237,0.25); }
-
-        /* Layout */
-        .help-layout { display:grid; grid-template-columns:220px 1fr; gap:20px; align-items:start; }
-
-        /* TOC */
-        .toc { background:white; border-radius:14px; padding:14px; position:sticky; top:20px; box-shadow:0 2px 12px rgba(0,0,0,0.06); }
-        .toc-title { font-size:11px; font-weight:700; color:#94a3b8; letter-spacing:0.08em; text-transform:uppercase; padding:4px 8px 10px; border-bottom:1px solid #f1f5f9; margin-bottom:8px; }
-        .toc-item { display:flex; align-items:center; gap:8px; padding:8px 10px; border-radius:8px; font-size:13px; font-weight:500; cursor:pointer; transition:all 0.15s; color:#475569; border:none; background:none; width:100%; text-align:left; font-family:inherit; }
-        .toc-item:hover { background:#f0f4ff; color:#0050cb; }
-        .toc-item.active-user  { background:#eff6ff; color:#0050cb; font-weight:700; }
-        .toc-item.active-admin { background:#f5f3ff; color:#7c3aed; font-weight:700; }
-
-        /* Sections */
-        .content-area { display:flex; flex-direction:column; gap:16px; }
-        .help-section { background:white; border-radius:14px; overflow:hidden; box-shadow:0 2px 12px rgba(0,0,0,0.06); scroll-margin-top:20px; border:1px solid transparent; }
-        .section-header { padding:18px 22px; display:flex; align-items:center; gap:12px; cursor:pointer; user-select:none; border-bottom:1px solid #f1f5f9; }
-        .section-header:hover { background:#fafbff; }
-        .section-emoji { font-size:22px; width:40px; height:40px; background:#eff6ff; border-radius:10px; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-        .section-emoji.admin-emoji { background:#f5f3ff; }
-        .section-title { font-size:15px; font-weight:700; flex:1; }
-        .section-chevron { font-size:12px; color:#94a3b8; transition:transform 0.2s; }
-        .section-chevron.open { transform:rotate(180deg); }
-        .section-body { padding:22px; display:none; }
-        .section-body.open { display:block; }
-
-        /* Content pieces */
-        .help-desc { color:#475569; font-size:14px; line-height:1.6; margin-bottom:16px; padding:12px 14px; background:#f8faff; border-left:3px solid #0050cb; border-radius:0 8px 8px 0; }
-        .help-desc.admin-desc { border-left-color:#7c3aed; background:#faf5ff; }
-
-        .step-list { display:flex; flex-direction:column; gap:12px; }
-        .step { display:flex; gap:14px; align-items:flex-start; padding:12px 14px; background:#fafbff; border-radius:10px; }
-        .step-num { width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,#0050cb,#0066ff); color:white; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-        .step-num.admin-num { background:linear-gradient(135deg,#7c3aed,#9333ea); }
-        .step strong { display:block; font-size:13px; margin-bottom:4px; }
-        .step p { font-size:13px; color:#64748b; line-height:1.5; }
-
-        .feature-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
-        .feature-card { padding:14px; border-radius:10px; background:#f8faff; border:1px solid #e8efff; display:flex; gap:10px; align-items:flex-start; }
-        .feature-card.blue   { background:#eff6ff; border-color:#dbeafe; }
-        .feature-card.green  { background:#f0fdf4; border-color:#dcfce7; }
-        .feature-card.amber  { background:#fffbeb; border-color:#fef3c7; }
-        .feature-card.purple { background:#faf5ff; border-color:#ede9fe; }
-        .feature-icon { font-size:20px; flex-shrink:0; margin-top:2px; }
-        .feature-card strong { font-size:13px; display:block; margin-bottom:4px; }
-        .feature-card p { font-size:12px; color:#64748b; line-height:1.4; }
-
-        .tip-box,.warning-box { display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:10px; font-size:13px; line-height:1.5; margin-top:14px; }
-        .tip-box     { background:#fffbeb; border:1px solid #fed7aa; color:#92400e; }
-        .warning-box { background:#fff1f2; border:1px solid #fecdd3; color:#9f1239; }
-        .tip-icon    { font-size:16px; flex-shrink:0; margin-top:1px; }
-
-        .info-grid { display:flex; flex-direction:column; gap:8px; margin-top:14px; }
-        .info-item { display:flex; gap:10px; align-items:baseline; padding:10px 12px; background:#f8faff; border-radius:8px; font-size:13px; }
-        .info-label { font-weight:700; color:#0050cb; white-space:nowrap; min-width:140px; flex-shrink:0; }
-        .info-label.admin-label { color:#7c3aed; }
-        .info-item span:last-child { color:#475569; }
-
-        .tag { display:inline-block; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:5px; padding:1px 7px; font-size:12px; font-weight:600; }
-        .tag.tag-red { background:#fff1f2; color:#be123c; border-color:#fecdd3; }
-
-        @media (max-width:640px) {
-          .help-layout { grid-template-columns:1fr; }
-          .toc { display:none; }
-          .feature-grid { grid-template-columns:1fr; }
-          .help-hero h1 { font-size:20px; }
-        }
-      `}</style>
-
-      <div className="help-page">
-        {/* Hero — สีต่างกันตาม role */}
-        <div className={`help-hero ${isAdmin ? 'admin-hero' : 'student-hero'}`}>
-          <div className="help-hero-badge">
-            {isAdmin ? '⚡ แอดมิน/ครู' : '🎓 นักเรียน'} · คู่มือการใช้งาน
+          <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black mb-3 ${
+            isAdmin ? 'bg-violet-500/30 border border-violet-400/30' : 'bg-indigo-500/30 border border-indigo-400/30'
+          }`}>
+            {isAdmin ? <><Zap size={10} /> ⚡ แอดมิน/ครู · คู่มือการใช้งาน</> : <><GraduationCap size={10} /> 🎓 นักเรียน · คู่มือการใช้งาน</>}
           </div>
-          <h1>
-            {isAdmin
-              ? 'คู่มือสำหรับครูและแอดมิน\nThe Scholar V3'
-              : 'คู่มือการใช้งาน\nThe Scholar V3'}
+
+          <h1 className="text-xl sm:text-2xl font-black mb-1 leading-snug">
+            {isAdmin ? 'คู่มือสำหรับครูและแอดมิน' : 'คู่มือการใช้งาน'}<br />
+            <span className="opacity-80 font-bold text-base">The Scholar V3</span>
           </h1>
-          <p>
+          <p className="text-[11px] font-semibold opacity-80 max-w-md mt-1">
             {isAdmin
               ? 'วิธีจัดการนักเรียน ควิซ สื่อ ประกาศ OMR และนำออกข้อมูล'
               : 'วิธีใช้งานทุกฟีเจอร์ — สื่อการเรียน ควิซ OMR และโปรไฟล์'}
           </p>
-          <a href="/dashboard/profile" className="back-btn">← กลับสู่โปรไฟล์</a>
+
+          <a
+            href="/dashboard/profile"
+            className="mt-4 inline-flex items-center gap-1.5 bg-white/15 hover:bg-white/25 border border-white/20 text-white text-[11px] font-bold px-3.5 py-1.5 rounded-xl transition-all"
+          >
+            <ArrowLeft size={12} />
+            กลับสู่โปรไฟล์
+          </a>
         </div>
 
-        {/* แอดมินเห็น Tab switcher เพิ่ม */}
+        {/* ── TAB SWITCHER (admin only) ── */}
         {isAdmin && (
-          <div className="tab-bar">
+          <div className="flex gap-2 bg-white border border-slate-100 rounded-2xl p-1.5 shadow-sm">
             <button
-              className={`tab-btn tab-user ${tab === 'user' ? 'active' : ''}`}
               onClick={() => setTab('user')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all ${
+                tab === 'user'
+                  ? 'bg-gradient-to-r from-indigo-500 to-indigo-600 text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
             >
-              🎓 คู่มือนักเรียน
+              <GraduationCap size={13} /> คู่มือนักเรียน
             </button>
             <button
-              className={`tab-btn tab-admin ${tab === 'admin' ? 'active' : ''}`}
               onClick={() => setTab('admin')}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all ${
+                tab === 'admin'
+                  ? 'bg-gradient-to-r from-violet-600 to-violet-700 text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+              }`}
             >
-              ⚡ คู่มือแอดมิน
+              <Zap size={13} /> คู่มือแอดมิน
             </button>
           </div>
         )}
 
-        {/* Layout */}
-        <div className="help-layout">
-          {/* TOC */}
-          <div className="toc">
-            <div className="toc-title">สารบัญ</div>
-            {sections.map(s => (
-              <button
-                key={s.id}
-                className={`toc-item ${
-                  activeSection === s.id
-                    ? tab === 'admin' ? 'active-admin' : 'active-user'
-                    : ''
-                }`}
-                onClick={() => {
-                  setActiveSection(s.id)
-                  document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-                }}
-              >
-                <span>{s.icon}</span>
-                <span style={{fontSize:12}}>{s.title}</span>
-              </button>
-            ))}
-          </div>
+        {/* ── MAIN LAYOUT ── */}
+        <div className="flex gap-5 items-start">
+
+          {/* TOC sidebar */}
+          <aside className="hidden lg:block w-52 flex-shrink-0 sticky top-5">
+            <div className="bg-white border border-slate-100 rounded-2xl p-3 shadow-sm">
+              <p className="text-[9px] font-extrabold text-slate-400 uppercase tracking-widest px-2 pb-2 border-b border-slate-100 mb-2">
+                สารบัญ
+              </p>
+              {sections.map(s => (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setActiveId(s.id)
+                    document.getElementById(s.id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  }}
+                  className={`w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-xl text-[11px] font-semibold transition-all mb-0.5 ${
+                    activeId === s.id
+                      ? tab === 'admin'
+                        ? 'bg-violet-50 text-violet-700 font-bold'
+                        : 'bg-indigo-50 text-indigo-700 font-bold'
+                      : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                  }`}
+                >
+                  <span className={`flex-shrink-0 ${tab === 'admin' ? 'text-violet-500' : 'text-indigo-500'}`}>
+                    {s.icon}
+                  </span>
+                  {s.title}
+                </button>
+              ))}
+            </div>
+          </aside>
 
           {/* Sections */}
-          <div className="content-area">
+          <div className="flex-1 min-w-0 flex flex-col gap-3">
             {sections.map(s => (
               <HelpSection
                 key={s.id}
                 section={s}
                 isAdmin={tab === 'admin'}
-                onEnter={() => setActiveSection(s.id)}
+                onFocus={() => setActiveId(s.id)}
               />
             ))}
           </div>
         </div>
-      </div>
-    </>
-  )
-}
 
-function HelpSection({
-  section,
-  isAdmin,
-  onEnter,
-}: {
-  section: Section
-  isAdmin: boolean
-  onEnter: () => void
-}) {
-  const [open, setOpen] = useState(true)
-
-  return (
-    <div id={section.id} className="help-section" onMouseEnter={onEnter}>
-      <div className="section-header" onClick={() => setOpen(o => !o)}>
-        <div className={`section-emoji ${isAdmin ? 'admin-emoji' : ''}`}>{section.icon}</div>
-        <div className="section-title">{section.title}</div>
-        <span className={`section-chevron ${open ? 'open' : ''}`}>▼</span>
-      </div>
-      <div className={`section-body ${open ? 'open' : ''}`}>
-        {section.content}
       </div>
     </div>
   )

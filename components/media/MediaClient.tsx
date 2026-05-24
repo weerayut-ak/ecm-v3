@@ -335,12 +335,24 @@ export default function MediaClient({
 
   async function togglePin(item: MediaItem) {
     const newVal = !item.is_pinned
-    await supabase.from('media_items').update({ is_pinned: newVal }).eq('id', item.id)
-    if (item.type === 'knowledge') setKnowledge(p => p.map(k => k.id === item.id ? { ...k, is_pinned: newVal } : k))
-    else setVideos(p => p.map(v => v.id === item.id ? { ...v, is_pinned: newVal } : v))
+
+    const { error } = await supabase
+      .from('media_items')
+      .update({ is_pinned: newVal })
+      .eq('id', item.id)
+
+    if (error) {
+      toast.error(`ปักหมุดไม่สำเร็จ: ${error.message}`)
+      return  // ← หยุดเลย ไม่ update state
+    }
+
+    if (item.type === 'knowledge')
+      setKnowledge(p => p.map(k => k.id === item.id ? { ...k, is_pinned: newVal } : k))
+    else
+      setVideos(p => p.map(v => v.id === item.id ? { ...v, is_pinned: newVal } : v))
+
     toast.success(newVal ? '📌 ปักหมุดแล้ว' : 'ยกเลิกการปักหมุด')
   }
-
   async function handleDelete(item: MediaItem) {
     if (!confirm('ยืนยันการลบ?')) return
     await supabase.from('media_items').delete().eq('id', item.id)

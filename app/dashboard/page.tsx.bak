@@ -1,0 +1,101 @@
+import { createClient } from '@/lib/supabase/server'
+import DashboardClient from './DashboardClient'
+
+export default async function DashboardPage() {
+  let profile = null
+  let stats = { students: 0, quizzes: 0, announcements: 0, media: 0 }
+  let recentAnnouncements: { id: string; title: string; is_important: boolean; created_at: string; type: string; content?: string }[] = []
+  let openQuizzes: { id: string; title: string; pass_score: number; time_limit: number | null; description?: string }[] = []
+  let pinnedLessons: {
+    id: string; title: string; tag?: string; tag_color?: string; badge?: string; badge_color?: string
+    duration?: string; description?: string; last_viewed?: string; video_url: string; thumbnail_url?: string
+  }[] = []
+  let myStats: { totalSubmissions: number; avgScore: number; passedCount: number; pendingCount: number } | undefined
+  let quizPassStats: { quizId: string; title: string; passed: number; failed: number; total: number }[] = []
+
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    
+    if (user) {
+      const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+      profile = p
+      const isAdmin = p?.role === 'admin'
+
+      const [a, b, c, d, e, f, pinnedData, submissionsData, quizzesForStats] = await Promise.all([
+        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'student'),
+        supabase.from('quizzes').select('*', { count: 'exact', head: true }),
+        supabase.from('announcements').select('*', { count: 'exact', head: true }),
+        supabase.from('media_items').select('*', { count: 'exact', head: true }),
+        supabase.from('announcements')
+          .select('id, title, is_important, created_at, type, content')
+          .order('created_at', { ascending: false })
+          .limit(4),
+        supabase.from('quizzes')
+          .select('id, title, pass_score, time_limit, description')
+          .eq('is_open', true)
+          .limit(3),
+        supabase.from('media_items')
+          .select('*')
+          .eq('is_pinned', true)
+          .limit(3),
+        // submissions ของ user นี้ (student) หรือทั้งหมด (admin)
+        isAdmin
+          ? supabase.from('submissions').select('quiz_id, is_passed, quiz:quizzes(id, title)')
+          : supabase.from('submissions').select('score, is_passed').eq('student_id', user.id),
+        // open quizzes count (สำหรับคำนวณ pendingCount ของ student)
+        supabase.from('quizzes').select('id').eq('is_open', true),
+      ])
+
+      stats = {
+        students: a.count ?? 0,
+        quizzes: b.count ?? 0,
+        announcements: c.count ?? 0,
+        media: d.count ?? 0,
+      }
+      recentAnnouncements = e.data ?? []
+      openQuizzes = f.data ?? []
+      pinnedLessons = pinnedData.data ?? []
+
+      if (isAdmin) {
+        // Admin: group submissions by quiz_id → passed/failed
+        const subs = (submissionsData.data ?? []) as { quiz_id: string; is_passed: boolean | null; quiz: any }[]
+        const map = new Map<string, { title: string; passed: number; failed: number; total: number }>()
+        for (const s of subs) {
+          const qid   = s.quiz_id
+          const title = s.quiz?.title ?? 'ไม่ระบุชื่อ'
+          if (!map.has(qid)) map.set(qid, { title, passed: 0, failed: 0, total: 0 })
+          const entry = map.get(qid)!
+          entry.total++
+          if (s.is_passed) entry.passed++
+          else entry.failed++
+        }
+        quizPassStats = Array.from(map.entries()).map(([quizId, v]) => ({ quizId, ...v }))
+      } else {
+        // Student: คำนวณ myStats จาก submissions ของตัวเอง
+        const subs = (submissionsData.data ?? []) as { score: number | null; is_passed: boolean | null }[]
+        const openIds  = (quizzesForStats.data ?? []).map((q: any) => q.id)
+        const scored   = subs.filter(s => s.score !== null)
+        const avg      = scored.length ? scored.reduce((a, s) => a + (s.score ?? 0), 0) / scored.length : 0
+        const passed   = subs.filter(s => s.is_passed).length
+        // pendingCount = quizzes ที่ยังเปิดอยู่ แต่ student ยังไม่ได้ส่ง
+        const pending  = Math.max(0, openIds.length - subs.length)
+        myStats = { totalSubmissions: subs.length, avgScore: avg, passedCount: passed, pendingCount: pending }
+      }
+    }
+  } catch (error) {
+    console.error('Error loading dashboard server data:', error)
+  }
+
+  return (
+    <DashboardClient
+      profile={profile}
+      stats={stats}
+      recentAnnouncements={recentAnnouncements}
+      openQuizzes={openQuizzes}
+      pinnedLessons={pinnedLessons}
+      myStats={myStats}
+      quizPassStats={quizPassStats}
+    />
+  )
+}

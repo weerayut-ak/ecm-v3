@@ -5,10 +5,10 @@ import { createPortal } from 'react-dom'
 import Link from 'next/link'
 import {
   Bell, X, CheckCheck, ClipboardList,
-  Megaphone, UserCheck, ChevronRight, Inbox, Trash2,
+  Megaphone, UserCheck, ChevronRight, Inbox, Trash2, Calendar,
 } from 'lucide-react'
 
-type NotiType = 'quiz_submission' | 'new_quiz' | 'new_announcement'
+type NotiType = 'quiz_submission' | 'new_quiz' | 'new_announcement' | 'new_appointment'
 interface Notification {
   id: string; type: NotiType; title: string; body: string | null
   link: string | null; is_read: boolean; metadata: Record<string, unknown>; created_at: string
@@ -23,16 +23,19 @@ function timeAgo(iso: string) {
 function typeIcon(type: NotiType) {
   if (type === 'quiz_submission') return <UserCheck size={16} className="text-blue-600" />
   if (type === 'new_quiz')        return <ClipboardList size={16} className="text-violet-600" />
+  if (type === 'new_appointment') return <Calendar size={16} className="text-indigo-600" />
   return <Megaphone size={16} className="text-amber-500" />
 }
 function typeBg(type: NotiType) {
   if (type === 'quiz_submission') return 'bg-blue-50'
   if (type === 'new_quiz')        return 'bg-violet-50'
+  if (type === 'new_appointment') return 'bg-indigo-50'
   return 'bg-amber-50'
 }
 function typeLabel(type: NotiType) {
   if (type === 'quiz_submission') return { text: 'ส่งข้อสอบ',    cls: 'text-blue-700' }
   if (type === 'new_quiz')        return { text: 'แบบทดสอบใหม่', cls: 'text-violet-700' }
+  if (type === 'new_appointment') return { text: 'วันนัดหมาย',   cls: 'text-indigo-700' }
   return                                  { text: 'ประกาศ',       cls: 'text-amber-700' }
 }
 
@@ -50,6 +53,7 @@ function NotiModal({ noti, onClose }: { noti: Notification; onClose: () => void 
   const isSub  = noti.type === 'quiz_submission'
   const isQuiz = noti.type === 'new_quiz'
   const isAnn  = noti.type === 'new_announcement'
+  const isAppt = noti.type === 'new_appointment'
   const lbl    = typeLabel(noti.type)
   const score    = noti.metadata?.score    as number  | null | undefined
   const isPassed = noti.metadata?.is_passed as boolean | undefined
@@ -77,10 +81,22 @@ function NotiModal({ noti, onClose }: { noti: Notification; onClose: () => void 
               {isPassed !== undefined && <div className="flex items-center justify-between text-sm"><span className="font-semibold text-slate-500">ผลการสอบ</span><span className={`rounded-full px-3 py-0.5 text-xs font-extrabold ${isPassed ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>{isPassed ? 'ผ่าน ✓' : 'ไม่ผ่าน ✗'}</span></div>}
             </div>
           )}
+          {isAppt && (
+            <div className="mb-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4 space-y-1.5">
+              <div className="flex items-center gap-2 text-sm text-indigo-700 font-bold">
+                <Calendar size={14} />
+                <span>วันนัดหมายใหม่</span>
+              </div>
+              {noti.body && (
+                <p className="text-sm text-indigo-600 font-medium">{noti.body}</p>
+              )}
+            </div>
+          )}
           <p className="mb-5 text-xs text-slate-400">{timeAgo(noti.created_at)}</p>
           <div className="flex flex-col gap-2">
             {isQuiz && noti.link && <Link href={noti.link} onClick={onClose} className="flex items-center justify-center gap-2 rounded-2xl bg-violet-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-violet-700 active:scale-95"><ClipboardList size={16} />ไปทำแบบทดสอบ<ChevronRight size={14} className="opacity-70" /></Link>}
             {isAnn && noti.link && <Link href={noti.link} onClick={onClose} className="flex items-center justify-center gap-2 rounded-2xl bg-amber-500 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-amber-600 active:scale-95"><Megaphone size={16} />ดูประกาศทั้งหมด<ChevronRight size={14} className="opacity-70" /></Link>}
+            {isAppt && noti.link && <Link href={noti.link} onClick={onClose} className="flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 active:scale-95"><Calendar size={16} />ดูปฏิทินนัดหมาย<ChevronRight size={14} className="opacity-70" /></Link>}
             {isSub && <Link href="/dashboard/admin/submissions" onClick={onClose} className="flex items-center justify-center gap-2 rounded-2xl bg-blue-50 px-5 py-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100 active:scale-95">ดูประวัติการสอบทั้งหมด<ChevronRight size={14} className="opacity-60" /></Link>}
             <button onClick={onClose} className="rounded-2xl bg-slate-100 px-5 py-3 text-sm font-semibold text-slate-600 transition hover:bg-slate-200">ปิด</button>
           </div>
@@ -126,7 +142,6 @@ export default function NotificationBell() {
     return () => document.removeEventListener('mousedown', handler)
   }, [open])
 
-  // ── actions ──────────────────────────────────────────────────────────────
   const markAllRead = async () => {
     setNotis((prev) => prev.map((n) => ({ ...n, is_read: true })))
     await fetch('/api/notifications/mark-read', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).catch(() => {})
@@ -151,7 +166,6 @@ export default function NotificationBell() {
   return (
     <>
       <div className="relative" ref={dropRef}>
-        {/* Bell button */}
         <button
           onClick={() => { setOpen((o) => !o); if (!open) fetchNotis() }}
           title="การแจ้งเตือน"
@@ -165,13 +179,11 @@ export default function NotificationBell() {
           )}
         </button>
 
-        {/* Dropdown */}
         {open && (
           <div
             className="absolute right-0 top-full z-[100] mt-2 flex w-[min(320px,calc(100vw-32px))] flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-xl"
             style={{ maxHeight: 'min(480px,80dvh)' }}
           >
-            {/* Header */}
             <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-3">
               <div className="flex items-center gap-2">
                 <Bell size={14} className="text-blue-600" />
@@ -194,7 +206,6 @@ export default function NotificationBell() {
               </div>
             </div>
 
-            {/* List */}
             <div className="overflow-y-auto">
               {loading && notis.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-10 text-slate-400">
@@ -230,7 +241,6 @@ export default function NotificationBell() {
                         </div>
                         {!n.is_read && <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-blue-500" />}
                       </button>
-                      {/* ปุ่มลบทีละอัน */}
                       <button
                         onClick={(e) => deleteOne(n.id, e)}
                         title="ลบ"

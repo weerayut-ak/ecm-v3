@@ -1,6 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import HelpClient from '@/components/help/HelpClient'
+import { ROLES } from '@/constants/roles'
 
 export default async function HelpPage() {
   const supabase = await createClient()
@@ -13,7 +14,7 @@ export default async function HelpPage() {
     .eq('id', user.id)
     .single()
 
-  const role = profile?.role ?? 'student'
+  const role = (profile?.role ?? ROLES.STUDENT) as typeof ROLES[keyof typeof ROLES]
 
   return <HelpClient role={role} />
 }

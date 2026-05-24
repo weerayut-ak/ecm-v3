@@ -14,7 +14,7 @@ function adminClient() {
   )
 }
 
-export type NotificationType = 'quiz_submission' | 'new_quiz' | 'new_announcement'
+export type NotificationType = 'quiz_submission' | 'new_quiz' | 'new_announcement' | 'new_appointment'
 
 export interface CreateNotificationPayload {
   type: NotificationType
@@ -24,6 +24,7 @@ export interface CreateNotificationPayload {
   metadata?: Record<string, unknown>
   user_ids?: string[]
   target_role?: 'admin' | 'student'
+  grade_filter?: string[] | null   // ส่งเฉพาะนักเรียนชั้นที่ระบุ (null = ทุกชั้น)
 }
 
 export async function POST(req: Request) {
@@ -34,10 +35,17 @@ export async function POST(req: Request) {
     let userIds: string[] = payload.user_ids ?? []
 
     if (payload.target_role && userIds.length === 0) {
-      const { data: profiles, error } = await supabase
+      let query = supabase
         .from('profiles')
         .select('id')
         .eq('role', payload.target_role)
+
+      // กรองตาม grade ถ้ากำหนดไว้
+      if (payload.grade_filter && payload.grade_filter.length > 0) {
+        query = query.in('grade', payload.grade_filter)
+      }
+
+      const { data: profiles, error } = await query
       if (error) return NextResponse.json({ error: error.message }, { status: 500 })
       userIds = (profiles ?? []).map((p: { id: string }) => p.id)
     }

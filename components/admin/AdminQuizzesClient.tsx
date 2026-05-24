@@ -26,10 +26,18 @@ interface Session {
   student: { full_name: string; nickname: string | null; grade: string | null; student_id: string | null } | null
 }
 
+const GRADES = ['ม.1/1','ม.1/2','ม.1/3','ม.2/1','ม.2/2','ม.2/3','ม.3/1','ม.3/2','ม.3/3']
+const GRADE_GROUPS = [
+  { label: 'ม.1', grades: ['ม.1/1','ม.1/2','ม.1/3'] },
+  { label: 'ม.2', grades: ['ม.2/1','ม.2/2','ม.2/3'] },
+  { label: 'ม.3', grades: ['ม.3/1','ม.3/2','ม.3/3'] },
+]
+
 const EMPTY_FORM = {
   title: "", description: "", pass_score: 60,
   time_limit: "" as number | string,
   is_open: false, opens_at: "", closes_at: "",
+  grade_filter: [] as string[],
 }
 
 export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow[] }) {
@@ -53,6 +61,7 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
         is_open: editingQuiz.is_open ?? false,
         opens_at: editingQuiz.opens_at ? editingQuiz.opens_at.slice(0, 16) : "",
         closes_at: editingQuiz.closes_at ? editingQuiz.closes_at.slice(0, 16) : "",
+        grade_filter: (editingQuiz as any).grade_filter ?? [],
       })
       setFormOpen(true)
     } else {
@@ -87,6 +96,7 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
       time_limit: form.time_limit ? Number(form.time_limit) : null,
       is_open: form.is_open,
       opens_at: form.opens_at || null, closes_at: form.closes_at || null,
+      grade_filter: form.grade_filter.length > 0 ? form.grade_filter : null,
     }
     if (editingQuiz) {
       const { data, error } = await supabase.from("quizzes").update(payload).eq("id", editingQuiz.id).select("*, questions(count)").single()
@@ -113,6 +123,7 @@ export default function AdminQuizzesClient({ quizzes: init }: { quizzes: QuizRow
             link: `/dashboard/quizzes/${data.id}/terms`,
             metadata: { quiz_id: data.id },
             target_role: 'student',
+            grade_filter: form.grade_filter.length > 0 ? form.grade_filter : null,
           }),
         })
         const json = await res.json()
@@ -288,6 +299,64 @@ function QuizForm({
           checked={form.is_open} onChange={e => setForm(p => ({ ...p, is_open: e.target.checked }))} />
         เปิดให้ทำทันที
       </label>
+
+      {/* ── Grade Filter ── */}
+      <div className="rounded-xl border border-gray-100 bg-gray-50 p-3">
+        <div className="flex items-center justify-between mb-2">
+          <label className="form-label mb-0 text-xs font-bold">กำหนดชั้นที่มองเห็น</label>
+          {form.grade_filter.length > 0 && (
+            <button
+              type="button"
+              className="text-[11px] text-blue-600 hover:underline"
+              onClick={() => setForm(p => ({ ...p, grade_filter: [] }))}
+            >
+              ล้าง (ทุกชั้น)
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] text-gray-400 mb-2">
+          {form.grade_filter.length === 0 ? '✅ ทุกชั้นเห็นแบบทดสอบนี้' : `เฉพาะ ${form.grade_filter.join(', ')}`}
+        </p>
+        <div className="grid grid-cols-3 gap-x-2 gap-y-0.5">
+          {GRADE_GROUPS.map(group => (
+            <div key={group.label}>
+              <div className="text-[11px] font-bold text-gray-500 mb-1 flex items-center gap-1">
+                <button
+                  type="button"
+                  className="text-[10px] text-blue-500 hover:underline"
+                  onClick={() => {
+                    const allIn = group.grades.every(g => form.grade_filter.includes(g))
+                    setForm(p => ({
+                      ...p,
+                      grade_filter: allIn
+                        ? p.grade_filter.filter(x => !group.grades.includes(x))
+                        : [...new Set([...p.grade_filter, ...group.grades])]
+                    }))
+                  }}
+                >
+                  {group.label}
+                </button>
+              </div>
+              {group.grades.map(g => (
+                <label key={g} className="flex items-center gap-1.5 text-xs cursor-pointer py-0.5 hover:text-blue-600">
+                  <input
+                    type="checkbox"
+                    className="accent-blue-600"
+                    checked={form.grade_filter.includes(g)}
+                    onChange={e => setForm(p => ({
+                      ...p,
+                      grade_filter: e.target.checked
+                        ? [...p.grade_filter, g]
+                        : p.grade_filter.filter(x => x !== g)
+                    }))}
+                  />
+                  {g}
+                </label>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="flex gap-2 mt-1">
         {editingQuiz && (
           <button className="btn flex-1 rounded" onClick={onCancel}>ยกเลิก</button>
@@ -337,6 +406,17 @@ function QuizCard({ quiz, isEditing, onToggleOpen, onEdit, onManage, onPreview, 
             {quiz.opens_at && (
               <span>📅 {new Date(quiz.opens_at).toLocaleDateString("th-TH")}{quiz.closes_at && ` – ${new Date(quiz.closes_at).toLocaleDateString("th-TH")}`}</span>
             )}
+          </div>
+          {/* Grade filter badges */}
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {((quiz as any).grade_filter?.length > 0)
+              ? (quiz as any).grade_filter.map((g: string) => (
+                  <span key={g} className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 font-medium">
+                    {g}
+                  </span>
+                ))
+              : <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">ทุกชั้น</span>
+            }
           </div>
         </div>
       </div>
